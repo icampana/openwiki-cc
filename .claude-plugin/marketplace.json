@@ -1,13 +1,20 @@
 {
   "name": "openwiki-cc",
-  "owner": { "name": "SoulKyu" },
+  "owner": {
+    "name": "Iván Campaña"
+  },
   "description": "Marketplace for the openwiki Claude Code plugin — a documentation-wiki agent.",
   "plugins": [
     {
       "name": "openwiki",
       "source": "./",
       "description": "Generate/maintain the openwiki/ documentation wiki (init | update).",
-      "keywords": ["documentation", "wiki", "docs", "agent"]
+      "keywords": [
+        "documentation",
+        "wiki",
+        "docs",
+        "agent"
+      ]
     }
   ]
 }

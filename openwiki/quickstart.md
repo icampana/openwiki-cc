@@ -1,6 +1,6 @@
 # openwiki-cc — quickstart
 
-**openwiki-cc** is a native **Claude Code** and **OpenAI Codex** port of
+**openwiki-cc** is a native **Claude Code**, **OpenAI Codex**, and **opencode** port of
 [langchain-ai/openwiki](https://github.com/langchain-ai/openwiki): an agent that generates and
 maintains a documentation wiki (an `openwiki/` directory) for *any* repository — the same wiki
 you are reading now was produced by running it against this repo.
@@ -17,14 +17,24 @@ deliverable is the agent definition itself, expressed as prompt files.
 | Path | Role |
 |---|---|
 | [`commands/wiki.md`](../commands/wiki.md) | The Claude Code slash command → `/openwiki:wiki`. Contains the full routing, the four run steps, and the verbatim upstream system prompt. **This is the canonical agent definition.** |
-| [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) | The Codex port of the same agent → `$openwiki`. Same system prompt, adapted for Codex (no subagents; relies on Codex's native context compaction). |
+| [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) | The same agent for the shell-based hosts — **Codex** (`$openwiki`) and **opencode**, which both discover `.agents/skills/`. Same system prompt; the subagent section is marked opencode-only. |
+| [`.opencode/commands/wiki.md`](../.opencode/commands/wiki.md) | opencode's `/wiki`. Mode routing from `$ARGUMENTS` only — it delegates to the skill rather than restating the prompt. |
 | [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json), [`marketplace.json`](../.claude-plugin/marketplace.json) | Packaging so Claude Code can install the command as a plugin from a marketplace. |
 | [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh) | Optional shell gate for auto-running the wiki from a Claude Code `Stop`/`SessionEnd` hook — spawns the frontier model only when source actually changed. |
 | [`hooks/test_gate.sh`](../hooks/test_gate.sh) | Self-check for the gate's skip/run decisions. |
+| [`upstream.lock.json`](../upstream.lock.json) | The upstream ref this port was ported from, plus a SHA-256 per reproduced file. |
+| [`scripts/check-upstream-drift.sh`](../scripts/check-upstream-drift.sh) | Re-hashes those files against the latest upstream release. |
+| [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | Runs that check weekly and keeps one issue in sync with the report. |
 | [`README.md`](../README.md) | Human-facing install + usage guide. |
 
 The single source of truth for the agent's behavior is `commands/wiki.md`; the Codex `SKILL.md`
 tracks it with host-specific adaptations. When they disagree, `commands/wiki.md` is authoritative.
+
+> **This port reproduces upstream `0.0.4`; upstream is at `v0.3.3`.** Every file it reproduces has
+> changed since — most consequentially, the prompt bodies moved out to `src/agent/prompts/code.ts`.
+> Treat the port as an implementation of `0.0.4`, not of current upstream. See
+> [Detecting drift](architecture.md#detecting-upstream-drift) for how that gap is tracked and
+> [Fidelity to upstream](../README.md#fidelity-to-upstream) for the per-file detail.
 
 ## Install & run
 
@@ -37,8 +47,10 @@ Then from the root of a target repo: `/openwiki:wiki` (auto-routes), `/openwiki:
 `/openwiki:wiki update`. Plugin commands are always namespaced, so it is `/openwiki:wiki`, never a
 bare `/openwiki`. Copying `commands/wiki.md` into `.claude/commands/` instead gives a bare `/wiki`.
 
-**Codex (skill):** copy `.agents/skills/openwiki/` into `~/.agents/skills/` (or a repo's
-`.agents/skills/`), restart Codex, and invoke `$openwiki` or ask to "update the openwiki docs".
+**Codex and opencode (skill):** copy `.agents/skills/openwiki/` into `~/.agents/skills/` (or a
+repo's `.agents/skills/`) — both hosts read that path — then restart the host. Invoke `$openwiki`
+on Codex, or ask either host to "update the openwiki docs". For a real `/wiki` with `init`/`update`
+arguments on opencode, also copy `.opencode/commands/wiki.md` into `~/.config/opencode/commands/`.
 
 Full install variants (per-project vs global, both hosts) are in the [README](../README.md).
 
@@ -74,10 +86,16 @@ Documentation quality depends directly on the model — a small/fast tier produc
 ## Changing this repo
 
 - **Behavior of the agent** → edit [`commands/wiki.md`](../commands/wiki.md), then mirror any
-  semantic change into [`SKILL.md`](../.agents/skills/openwiki/SKILL.md). Keep the reproduced
+  semantic change into [`SKILL.md`](../.agents/skills/openwiki/SKILL.md). There are only these two
+  definitions; `.opencode/commands/wiki.md` carries no agent logic, so it does not need mirroring. Keep the reproduced
   system prompt faithful to upstream; mark harness adaptations explicitly (upstream marks them
   `[adapted]`).
 - **Packaging / version** → [`plugin.json`](../.claude-plugin/plugin.json) (bump `version`) and
   [`marketplace.json`](../.claude-plugin/marketplace.json).
+- **Re-porting a change from upstream** → after updating `commands/wiki.md` and `SKILL.md`, run
+  `sh scripts/check-upstream-drift.sh --update` to record the new hashes, and correct
+  [Fidelity to upstream](../README.md#fidelity-to-upstream) in the same change. Skipping the
+  `--update` leaves the lock asserting an older ref; running it *without* re-porting silences the
+  alarm while the port stays stale.
 - **Auto-run gate** → [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh); run
   `sh hooks/test_gate.sh` after any change to it (it exercises every skip/run branch).

@@ -1,17 +1,19 @@
 # openwiki-cc
 
-A native **Claude Code** and **OpenAI Codex** port of
+A native **Claude Code**, **OpenAI Codex**, and **opencode** port of
 [OpenWiki](https://github.com/langchain-ai/openwiki) — an agent that generates and maintains a
 documentation wiki (`openwiki/`) for any repository.
 
 OpenWiki ships as a standalone CLI on its own harness (DeepAgents/LangGraph, a local shell
-backend, a SQLite checkpointer, provider adapters, an Ink TUI). Coding agents like Claude Code
-and Codex already provide all of that plumbing. This repo extracts **the agent itself** — the
-documentation system prompt, the git-evidence collection, the wiki structure, and the idempotence
-logic — and re-expresses it natively for each host:
+backend, a SQLite checkpointer, provider adapters, an Ink TUI). Coding agents already provide all
+of that plumbing. This repo extracts **the agent itself** — the documentation system prompt, the
+git-evidence collection, the wiki structure, and the idempotence logic — and re-expresses it
+natively for each host:
 
 - **Claude Code** — a slash-command plugin: `commands/wiki.md` → `/openwiki:wiki`.
 - **Codex** — a skill: `.agents/skills/openwiki/SKILL.md` → `$openwiki`.
+- **opencode** — the *same* skill file, which opencode also discovers, plus a thin
+  `.opencode/commands/wiki.md` that adds `init`/`update` slash arguments → `/wiki`.
 
 The system prompt and the exact git commands are reproduced **verbatim from OpenWiki's real
 source**, not from memory.
@@ -30,7 +32,7 @@ history — and on later runs it updates only what actually changed.
 Inside Claude Code:
 
 ```
-/plugin marketplace add SoulKyu/openwiki-cc
+/plugin marketplace add icampana/openwiki-cc
 /plugin install openwiki@openwiki-cc
 ```
 
@@ -54,28 +56,45 @@ cp commands/wiki.md your-repo/.claude/commands/
 cp commands/wiki.md ~/.claude/commands/
 ```
 
-## Install — Codex
+## Install — Codex and opencode
 
-Codex loads skills from `.agents/skills/`. Copy the skill folder globally (available in every
-repo) or into a specific repo, then restart Codex:
+Both hosts read skills from `~/.agents/skills/`, so one copy serves both:
 
 ```bash
-# global → available everywhere
+# global → available in every repo, on both hosts
 mkdir -p ~/.agents/skills
 cp -r .agents/skills/openwiki ~/.agents/skills/
-
-# or per-repo
-mkdir -p your-repo/.agents/skills
-cp -r .agents/skills/openwiki your-repo/.agents/skills/
 ```
 
-Invoke it explicitly with `$openwiki` (or via the `/skills` menu); Codex may also trigger it
-implicitly when you ask to "initialize / update the openwiki docs". It auto-detects init vs
-update from whether `openwiki/` already exists.
+Restart the host afterward. To scope it to a single repo instead, copy the same folder to
+`your-repo/.agents/skills/`.
+
+**Codex.** Invoke it with `$openwiki` (or via the `/skills` menu); Codex may also trigger it
+implicitly when you ask to "initialize / update the openwiki docs".
 
 > Codex skills don't take slash arguments, so the mode comes from your phrasing (or the
 > `openwiki/` auto-detect) rather than an `init`/`update` token. Codex custom prompts
 > (`~/.codex/prompts/`) are deprecated, so this ships as a skill.
+
+**opencode.** The skill alone works — ask to "update the openwiki docs" and opencode loads it via
+the native `skill` tool. For a real `/wiki` that takes `init` and `update` as arguments, also
+install the command:
+
+```bash
+# global → /wiki in every repo
+mkdir -p ~/.config/opencode/commands
+cp .opencode/commands/wiki.md ~/.config/opencode/commands/
+
+# or per-repo
+mkdir -p your-repo/.opencode/commands
+cp .opencode/commands/wiki.md your-repo/.opencode/commands/
+```
+
+The command holds no agent logic — it resolves the mode from `$ARGUMENTS` and hands off to the
+skill, so there is no third copy of the system prompt to keep in sync.
+
+> opencode has a **Task tool**, so it runs the parallel read-only subagents that Codex cannot.
+> The skill marks that section opencode-only; everything else is identical on both hosts.
 
 ## Usage
 
@@ -92,6 +111,10 @@ update from whether `openwiki/` already exists.
 > **Note** — auto-route replaces upstream OpenWiki's interactive-chat default (a slash command
 > can't be a bare `/openwiki` anyway; plugin commands are always namespaced). `init` and `update`
 > remain explicit.
+
+**opencode** — with the command installed, `/wiki`, `/wiki init`, `/wiki update`, and
+`/wiki update <instruction>` behave exactly like the Claude Code table above. Without it, invoke
+the skill by asking to "update the openwiki docs".
 
 **Codex** — invoke `$openwiki` (or ask to "update the openwiki docs"). It auto-detects init
 (no `openwiki/`) vs update (`openwiki/` exists); say "initialize" or "update" to force a mode,
@@ -259,7 +282,9 @@ fallback, and LangSmith tracing (Claude Code transcripts cover debugging).
 commands/
   wiki.md            # Claude Code slash command (system prompt + git + idempotence)
 .agents/skills/
-  openwiki/SKILL.md  # Codex skill (same agent, adapted to Codex tools + context model)
+  openwiki/SKILL.md  # skill for Codex AND opencode (same agent, shell tool vocabulary)
+.opencode/commands/
+  wiki.md            # opencode /wiki — mode routing only; delegates to the skill
 hooks/
   openwiki-gate.sh   # shell gate for hook-driven auto-run
   test_gate.sh       # self-check for the gate
@@ -272,16 +297,26 @@ README.md
 ```
 
 The repo is both the Claude Code plugin and its marketplace, so
-`/plugin marketplace add SoulKyu/openwiki-cc` exposes it directly. The Codex skill under
-`.agents/skills/` is copied into `~/.agents/skills/` or a repo's `.agents/skills/`.
+`/plugin marketplace add icampana/openwiki-cc` exposes it directly. The skill under
+`.agents/skills/` is copied to `~/.agents/skills/` (or a repo's `.agents/skills/`), where **both**
+Codex and opencode find it.
 
-Both hosts carry the **same** verbatim OpenWiki system prompt, git commands, `.last-update.json`
-shape and idempotence logic. They differ only where the hosts differ: Claude Code uses native
-file tools + parallel read-only subagents for exploration; Codex uses its shell + `apply_patch`
-and relies on its own native context compaction (no subagent tool), so its skill drops the
-subagent section and generalizes the tool vocabulary.
+There are two agent definitions, not three. `commands/wiki.md` is authoritative for Claude Code;
+`SKILL.md` carries the same verbatim OpenWiki system prompt, git commands, `.last-update.json`
+shape and idempotence logic for the shell-based hosts. The opencode command adds slash-argument
+routing and nothing else, so it never drifts from the skill.
+
+The hosts differ in exactly one place — subagents:
+
+| | Exploration strategy |
+|---|---|
+| Claude Code | native file tools + parallel read-only subagents (Task tool) |
+| opencode | same, via its own Task tool — the skill's subagent section is marked opencode-only |
+| Codex | no subagent tool; relies on native context compaction plus read discipline |
 
 ## License
 
 The upstream prompt and command semantics originate from
-[langchain-ai/openwiki](https://github.com/langchain-ai/openwiki).
+[langchain-ai/openwiki](https://github.com/langchain-ai/openwiki). This repository is a fork of
+[SoulKyu/openwiki-cc](https://github.com/SoulKyu/openwiki-cc), which did the original Claude Code
+and Codex port.
