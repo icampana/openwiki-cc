@@ -1,9 +1,20 @@
 {
   "name": "openwiki",
-  "description": "Generate and maintain an openwiki/ documentation wiki (init | update) for any repository — a native Claude Code port of langchain-ai/openwiki.",
-  "version": "0.1.1",
-  "author": { "name": "SoulKyu" },
-  "homepage": "https://github.com/SoulKyu/openwiki-cc",
-  "repository": "https://github.com/SoulKyu/openwiki-cc",
-  "keywords": ["documentation", "wiki", "openwiki", "docs", "agent", "codebase"]
+  "description": "Generate and maintain an openwiki/ documentation wiki (init | update) for any repository — a port of langchain-ai/openwiki for Claude Code, Codex, and opencode.",
+  "version": "0.2.0",
+  "author": {
+    "name": "Iván Campaña"
+  },
+  "homepage": "https://github.com/icampana/openwiki-cc",
+  "repository": "https://github.com/icampana/openwiki-cc",
+  "keywords": [
+    "documentation",
+    "wiki",
+    "openwiki",
+    "docs",
+    "agent",
+    "codebase",
+    "opencode",
+    "codex"
+  ]
 }

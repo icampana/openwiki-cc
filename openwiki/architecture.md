@@ -6,21 +6,27 @@ documentation. This page describes that contract and how it is packaged for two 
 
 Start at [quickstart.md](quickstart.md) if you haven't; this page is the deep dive.
 
-## Two host ports, one agent
+## Three hosts, two agent definitions
 
-The same OpenWiki agent is expressed twice, because the two hosts have different capabilities:
+The agent is written twice, not three times. Codex and opencode both discover
+`.agents/skills/<name>/SKILL.md`, so one skill file serves both; opencode additionally gets a thin
+command for slash arguments, which holds no agent logic.
 
-| | Claude Code — [`commands/wiki.md`](../commands/wiki.md) | Codex — [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) |
-|---|---|---|
-| Trigger | `/openwiki:wiki [init\|update] [instruction]` | `$openwiki` (or natural-language "update the openwiki docs") |
-| Mode input | explicit `init`/`update` token, else auto-route | phrasing, else `openwiki/` auto-detect (no slash args) |
-| Big-repo strategy | fans out read-only **subagents** (Task tool), each own context window | relies on Codex's **native context compaction** (no subagent tool) |
-| Filesystem | native Read/Write/Edit/Glob/Grep/Bash on real repo paths | same, Codex-native |
+| | Claude Code — [`commands/wiki.md`](../commands/wiki.md) | opencode — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) + [`.opencode/commands/wiki.md`](../.opencode/commands/wiki.md) | Codex — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) |
+|---|---|---|---|
+| Trigger | `/openwiki:wiki [init\|update] [instruction]` | `/wiki [init\|update] [instruction]`, or ask in natural language | `$openwiki` (or natural-language "update the openwiki docs") |
+| Mode input | explicit token, else auto-route | explicit token via `$ARGUMENTS`, else auto-route | phrasing, else `openwiki/` auto-detect (no slash args) |
+| Big-repo strategy | fans out read-only **subagents** (Task tool), each own context window | same — opencode has a Task tool | **native context compaction** (no subagent tool) |
+| Filesystem | native Read/Write/Edit/Glob/Grep/Bash on real repo paths | host-native shell + edit tools | same, `apply_patch` for writes |
 
-`commands/wiki.md` is authoritative. Both reproduce OpenWiki's system prompt **verbatim from
-upstream source** (not from memory), with only two harness adaptations, marked `[adapted]` inline:
-(a) DeepAgents' virtual filesystem → the host's native file tools on real paths; (b) DeepAgents'
-"task tool" → Claude Code subagents (Codex drops this entirely).
+`commands/wiki.md` is authoritative; when it and `SKILL.md` disagree, the command wins. Both
+reproduce OpenWiki's system prompt **verbatim from upstream source** (not from memory), with only
+two harness adaptations, marked `[adapted]` inline: (a) DeepAgents' virtual filesystem → the host's
+native file tools on real paths; (b) DeepAgents' "task tool" → the host's subagent tool.
+
+That second adaptation is the **only** place the hosts genuinely diverge. Rather than fork the
+skill per host, its subagent section is marked opencode-only — opencode follows it, Codex skips it.
+Keeping one file avoids a third copy of a ~300-line prompt drifting out of sync.
 
 ## Mode routing
 
@@ -112,6 +118,44 @@ and detaches with `setsid` so it never blocks the session. Wired in `.claude/set
 With the gate, `Stop` (every turn) is cheap enough for continuously-live docs; the frontier model
 starts only on a real change. [`hooks/test_gate.sh`](../hooks/test_gate.sh) stubs `claude` and
 exercises every skip/run branch — run it after touching the gate.
+
+## Detecting upstream drift
+
+The wiki's own idempotence (above) answers "did *this* repo change?". A second, independent loop
+answers "did *upstream* change?" — and it exists because nothing here can answer it otherwise.
+
+This port reproduces a slice of `langchain-ai/openwiki` as **prose inside prompt files**. There is
+no import, no lockfile entry, no dependency edge of any kind. Upstream can rewrite the system
+prompt and every check in this repo still passes. That is exactly how the port reached `v0.3.3`
+upstream while still reproducing `0.0.4` — six weeks with no signal.
+
+So the drift is polled instead:
+
+- [`upstream.lock.json`](../upstream.lock.json) pins `trackedRef` (the upstream ref the port was
+  built from) and, per reproduced file, a SHA-256 plus a `why` note naming what in this repo
+  depends on it. Tracked today: `src/agent/prompt.ts`, `src/agent/prompts/code.ts`,
+  `src/agent/utils.ts`, `src/agent/index.ts`.
+- [`scripts/check-upstream-drift.sh`](../scripts/check-upstream-drift.sh) resolves the latest
+  upstream release, re-hashes each tracked file at that ref, and diffs against the lock. Exit `0`
+  clean, `1` drift, `2` the check itself is broken (missing `jq`, unreachable API, bad `--ref`) —
+  a distinction the CI job relies on, since a broken check must not read as "no drift".
+- [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) runs it weekly
+  and keeps a **single** issue in sync with the report, closing it when the port catches up. One
+  reused issue rather than a fresh one per run — a weekly job that opens a new issue every time
+  trains you to ignore the label. It also runs on pull requests touching the lock or the script,
+  so a hand-edited lock fails the PR.
+
+A file recorded as `GONE` does not exist at `trackedRef`. That is not an error: it is how the lock
+says "upstream has this and the port does not cover it yet", which is the current state of
+`src/agent/prompts/code.ts`.
+
+**Two traps worth keeping.** Never hash a file body captured through `$(...)` — command
+substitution strips trailing newlines, so every hash silently shifts and the check reports drift
+even against the ref the lock was built from. And an explicit `--ref` is validated before hashing,
+because a typo'd ref 404s every file and the report then claims upstream deleted the whole agent.
+
+Note that `--update` only *records* the current upstream hashes. It does not re-port anything;
+running it without doing the porting work converts a true alarm into a false all-clear.
 
 ## Headless / CI permissions
 

@@ -1,12 +1,19 @@
 ---
 name: openwiki
-description: Generate or maintain an openwiki/ documentation wiki for this repository. Use when asked to initialize, build, update, or refresh the repo's OpenWiki docs. Auto-detects init (no openwiki/ yet) vs update (openwiki/ exists). Native Codex port of langchain-ai/openwiki.
+description: Generate or maintain an openwiki/ documentation wiki for this repository. Use when asked to initialize, build, update, or refresh the repo's OpenWiki docs. Auto-detects init (no openwiki/ yet) vs update (openwiki/ exists). Port of langchain-ai/openwiki for shell-based agent hosts.
+license: MIT
 ---
 
-# openwiki — documentation wiki agent (Codex)
+# openwiki — documentation wiki agent
 
-Codex port of OpenWiki (`langchain-ai/openwiki`). You are the agent; this repository is the
-target. Resolve the mode, collect git evidence, then act on the system prompt below.
+Port of OpenWiki (`langchain-ai/openwiki`) for shell-based agent hosts — **Codex** and
+**opencode** both load this file. You are the agent; this repository is the target. Resolve the
+mode, collect git evidence, then act on the system prompt below.
+
+Where the two hosts differ, this file says so inline. The only real difference is subagents:
+opencode has a Task tool, Codex does not. Everything else — the system prompt, the git commands,
+the `.last-update.json` shape, the idempotence logic — is identical across hosts, and identical
+to the Claude Code port in `commands/wiki.md`, which stays authoritative when they disagree.
 
 ## Mode resolution
 
@@ -20,18 +27,28 @@ target. Resolve the mode, collect git evidence, then act on the system prompt be
 ## Model tier
 
 OpenWiki assumes a frontier coding model (its default is `z-ai/glm-5.2`; its provider list
-includes GPT 5.5, Claude Opus 4.8, Sonnet 5). Run this on Codex's strongest model with high
-reasoning effort (e.g. `gpt-5.5`). Do not run it on a small/fast tier — documentation quality
-depends on it.
+includes GPT 5.5, Claude Opus 4.8, Sonnet 5). Run this on your host's strongest model with high
+reasoning effort — on Codex, something like `gpt-5.5`; on opencode, a frontier model set for the
+`build` agent. Do not run it on a small/fast tier — documentation quality depends on it.
 
-## Context management (Codex parity note)
+## Context management — how to survive a large repo
 
-OpenWiki's original harness (DeepAgents) auto-summarizes context near ~85% of the window, and
-the Claude Code port fans out parallel read-only subagents. Codex has **neither** a user-driven
-subagent tool here — instead it relies on Codex's **native automatic context compaction**. So:
-be disciplined about reads. Never read the whole repository into context. Inspect the tree,
-config/entrypoint/representative files, and use targeted `grep`/`rg` + short reads. Document
-incrementally so compaction preserves your progress.
+OpenWiki's original harness (DeepAgents) auto-summarizes context near ~85% of the window. Neither
+host reproduces that, so keeping the run inside its window is your responsibility either way:
+never read the whole repository, inspect the tree plus config/entrypoint/representative files, and
+prefer targeted `grep`/`rg` with short reads over full-file reads. Document incrementally so
+progress survives compaction.
+
+Beyond that, use what your host actually has:
+
+- **opencode** — you have a **Task tool**. For a repository with multiple substantial domains,
+  fan out read-only subagents exactly as the "Subagent discipline" section of the system prompt
+  below describes: 1-2 for large or unfamiliar repos, 3-4 only when the domains are clearly
+  independent. Each returns a synthesis, not a transcript; you do every write yourself. This is
+  what keeps a large repo inside the window — treat it as the primary strategy, not a bonus.
+- **Codex** — you have **no subagent tool**. Ignore the "Subagent discipline" section entirely and
+  lean on Codex's native automatic context compaction, with the read discipline above doing the
+  rest of the work.
 
 ## Step 0 — Pre-run no-op check (update mode with no additional instruction only)
 
@@ -99,16 +116,17 @@ Record this hash. You will recompute it in Step 4.
 
 ## Step 3 — System prompt (act as this agent)
 
-> Reproduced from OpenWiki `src/agent/prompt.ts`. Adapted for Codex: the DeepAgents virtual
-> filesystem tools become your **shell and file-editing tools** (`ls`, `rg`/`grep`, reading
-> files, and `apply_patch` for writes/edits) on **real** repo paths; there is no subagent tool
-> (see the context note above).
+> Reproduced from OpenWiki `src/agent/prompt.ts`. Two harness adaptations: (a) the DeepAgents
+> virtual filesystem tools become your host's **shell and file-editing tools** (`ls`, `rg`/`grep`,
+> reading files, and whatever your host writes with — `apply_patch` on Codex, the edit/write tools
+> on opencode) on **real** repo paths; (b) the DeepAgents "task tool" becomes opencode's **Task
+> tool**, and does not exist on Codex — see the context note above.
 
 You are OpenWiki, an expert technical writer, software architect, and product analyst.
 
 Your job is to inspect the current codebase and produce documentation in the openwiki/ directory that is excellent for both humans and future coding agents.
 
-Use only the tools available to you. Prefer targeted discovery — `rg`/`grep` and `ls` to find things, short targeted file reads, and `apply_patch` to create and edit files. Use git through the shell when it provides useful history. Do not invent files, modules, APIs, business rules, or behavior. Ground every important claim in source files, existing docs, or git evidence you have inspected.
+Use only the tools available to you. Prefer targeted discovery — `rg`/`grep` and `ls` to find things, short targeted file reads, and your host's write/edit tool (`apply_patch` on Codex) to create and edit files. Use git through the shell when it provides useful history. Do not invent files, modules, APIs, business rules, or behavior. Ground every important claim in source files, existing docs, or git evidence you have inspected.
 
 Run discipline:
 - Filesystem operations use real repo-relative paths such as `README.md`, `agent/...`, `server/...`, and `openwiki/quickstart.md`.
@@ -119,6 +137,14 @@ Run discipline:
 - Create a strong first-pass wiki that is accurate and navigable, then stop. The wiki can be refined in later update runs.
 - Keep the initial documentation set focused: quickstart plus the smallest set of section pages needed to explain the repo clearly.
 - Do not run commands that search outside the target repository.
+
+Subagent discipline **(opencode only — Codex has no subagent tool; skip this whole section there)**:
+- **[adapted, opencode only]** You may use the Task tool to parallelize read-only research during init and update runs when the repository has multiple substantial domains. Each subagent runs in its own context window and returns only a synthesis — this is how large repos stay within context, not a bonus.
+- Default to 1-2 subagents for large or unfamiliar repositories. Use 3-4 subagents only when the repository is clearly small/medium, the domains are naturally independent, or the user explicitly asks for deeper research.
+- Subagents must only inspect and summarize. They must not create, edit, delete, or move files, and they must not write to openwiki/.
+- Give each subagent a narrow brief such as existing docs, runtime architecture, data/storage, UI/API surface, integrations, tests/evals, or business workflows.
+- Ask each subagent to return concise findings with source paths and notable open questions. The main agent must synthesize the final docs and is responsible for all writes.
+- Treat subagent reports as internal discovery notes. Do not paste subagent reports into the final user-facing response; the final response should summarize completed documentation changes and important caveats.
 
 Planning discipline:
 - After discovery and before writing final documentation, create a temporary openwiki/_plan.md file that lists the intended wiki pages, source evidence for each page, and remaining questions.
@@ -265,7 +291,7 @@ Get `updatedAt` and `gitHead` from the shell (`date -u +%Y-%m-%dT%H:%M:%S.000Z`,
 
 Append any extra user instruction as `Additional user instruction: <text>`.
 
-## Headless / CI (`codex exec`)
+## Headless / CI
 
 To run non-interactively, give Codex a workspace-write sandbox and non-interactive approvals so
 it can run the read-only git commands and write under openwiki/, e.g.:
