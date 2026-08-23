@@ -200,11 +200,43 @@ Copy the script under `.claude/hooks/` and wire it in `.claude/settings.json`:
 
 ## Fidelity to upstream
 
-**Tracked against upstream `0.0.4`.** The reproduced surface — the system prompt
-(`src/agent/prompt.ts`), the git commands and no-op/snapshot/metadata logic (`src/agent/utils.ts`)
-— is byte-identical from `0.0.2` through `0.0.4`; every `0.0.2 → 0.0.4` change is harness plumbing
-this port deliberately omits (OpenRouter model fallback removed, `streamEvents` v3, non-TTY
-credential/startup flow).
+**Tracked against upstream `0.0.4`. Upstream is at `v0.3.3` — this port is behind.**
+The reproduced surface was byte-identical from `0.0.2` through `0.0.4`, but every tracked file has
+changed since:
+
+| Upstream file | At `0.0.4` | At `v0.3.3` | What it means here |
+|---|---|---|---|
+| `src/agent/prompt.ts` | 17,917 B | 9,129 B | The prompt bodies moved out to `src/agent/prompts/code.ts` (51 KB) and `personal.ts` (75 KB). The prompt reproduced in `commands/wiki.md` is stale. |
+| `src/agent/utils.ts` | 9,894 B | 14,768 B | Git log/diff construction left this file; `.last-update.json` gained `status` and an optional `language`, and `gitHead` is now written only when `outputMode` is `repository`. |
+| `src/agent/index.ts` | 28,887 B | 61,637 B | The run lifecycle grew a skeleton critic, link validation, and QA subagents. |
+
+Upstream also added subsystems this port does not cover at all: `openwiki-ignore.ts`,
+`wiki-link-validator.ts`, `wiki-qa-subagents.ts`, `skeleton-critic.ts`, `wiki-finalizer.ts`,
+`translation-middleware.ts`, and the `personal` output mode.
+
+Re-porting that surface is tracked work. Until it lands, treat this port as an implementation of
+OpenWiki `0.0.4`, not of current upstream.
+
+### Detecting drift
+
+Nothing here imports upstream, so no dependency bump can ever reveal that upstream moved. The port
+polls instead. [`upstream.lock.json`](upstream.lock.json) records a SHA-256 of each upstream file
+the port reproduces, at the ref it was ported from, and
+[`scripts/check-upstream-drift.sh`](scripts/check-upstream-drift.sh) re-hashes them against the
+latest upstream release:
+
+```sh
+sh scripts/check-upstream-drift.sh          # report drift; exit 1 if any
+sh scripts/check-upstream-drift.sh --ref 0.0.4   # check against a specific ref
+sh scripts/check-upstream-drift.sh --update      # accept current upstream as tracked
+```
+
+Run `--update` only *after* re-porting the changed surface — it records the new hashes and silences
+the alarm. Requires `jq` and `curl`; set `GITHUB_TOKEN` to raise the API rate limit.
+
+[`.github/workflows/upstream-drift.yml`](.github/workflows/upstream-drift.yml) runs the check every
+Monday and keeps a single issue in sync with the report, closing it when the port catches up. It
+also runs on pull requests that touch the lock or the script, so a hand-edited lock fails the PR.
 
 **Taken verbatim:** the full system prompt (`src/agent/prompt.ts`), the `## OpenWiki` section,
 the git commands (`src/agent/utils.ts`), the `.last-update.json` shape, and the snapshot / no-op
@@ -228,6 +260,14 @@ commands/
   wiki.md            # Claude Code slash command (system prompt + git + idempotence)
 .agents/skills/
   openwiki/SKILL.md  # Codex skill (same agent, adapted to Codex tools + context model)
+hooks/
+  openwiki-gate.sh   # shell gate for hook-driven auto-run
+  test_gate.sh       # self-check for the gate
+scripts/
+  check-upstream-drift.sh  # re-hashes the upstream files this port reproduces
+upstream.lock.json   # the upstream ref + per-file SHA-256 the port is ported from
+.github/workflows/
+  upstream-drift.yml # weekly drift check; keeps one issue in sync
 README.md
 ```
 

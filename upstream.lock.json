@@ -1,0 +1,28 @@
+{
+  "upstream": "langchain-ai/openwiki",
+  "trackedRef": "0.0.4",
+  "trackedVersion": "0.0.4",
+  "comment": "The upstream files this port reproduces, hashed at trackedRef. Regenerate with: sh scripts/check-upstream-drift.sh --update. A file recorded as GONE does not exist at trackedRef; it is listed because the port must eventually cover it.",
+  "files": {
+    "src/agent/prompt.ts": {
+      "sha256": "fdb529b839167e89effc91b762fe0907799b9b3c42214e69f5419b78eadb8096",
+      "bytes": 17917,
+      "why": "the verbatim system prompt reproduced in commands/wiki.md Step 3 and SKILL.md"
+    },
+    "src/agent/prompts/code.ts": {
+      "sha256": "GONE",
+      "bytes": 0,
+      "why": "upstream moved the prompt bodies here after 0.0.4; the port does not cover it yet"
+    },
+    "src/agent/utils.ts": {
+      "sha256": "0d9eeca0d47867a51341ee06f85739be76cdf82bd8594e5b4ae868138daeaacb",
+      "bytes": 9894,
+      "why": "git-evidence commands, getUpdateNoopStatus, and the .last-update.json shape used by commands/wiki.md and hooks/openwiki-gate.sh"
+    },
+    "src/agent/index.ts": {
+      "sha256": "4c853ff8353186edc15b53e20a7e6bfc3f60928c33ccb297c82cdcfbb523539e",
+      "bytes": 28887,
+      "why": "the run lifecycle: snapshot before, no-op decision, metadata write after"
+    }
+  }
+}

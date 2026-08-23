@@ -1,0 +1,76 @@
+name: Upstream drift
+
+# This port reproduces a slice of langchain-ai/openwiki as prompt files. There is
+# no dependency edge, so no ordinary bump can tell us upstream moved. Poll for it.
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays, 06:17 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - upstream.lock.json
+      - scripts/check-upstream-drift.sh
+      - .github/workflows/upstream-drift.yml
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  ISSUE_TITLE: "Upstream OpenWiki drift detected"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for drift
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          sh scripts/check-upstream-drift.sh > report.md 2>&1
+          code=$?
+          set -e
+          cat report.md
+          echo "drift=$code" >> "$GITHUB_OUTPUT"
+          # Exit 2 is a broken check (missing tool, unreachable API), not drift.
+          if [ "$code" -eq 2 ]; then
+            echo "::error::drift check failed to run"
+            exit 1
+          fi
+
+      # One issue, reused. A weekly cron that opens a fresh issue every run
+      # trains you to ignore the label.
+      - name: Open or update the drift issue
+        if: steps.check.outputs.drift == '1' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --state open --search "$ISSUE_TITLE in:title" \
+            --json number,title --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file report.md
+            echo "updated issue #$existing"
+          else
+            gh issue create --title "$ISSUE_TITLE" --body-file report.md
+          fi
+
+      - name: Close the drift issue when the port catches up
+        if: steps.check.outputs.drift == '0' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --state open --search "$ISSUE_TITLE in:title" \
+            --json number,title --jq "map(select(.title == env.ISSUE_TITLE)) | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Port is current with upstream again."
+          fi
+
+      - name: Fail the PR when the lock does not match upstream
+        if: steps.check.outputs.drift == '1' && github.event_name == 'pull_request'
+        run: |
+          echo "::error::upstream.lock.json does not match upstream; see the report above"
+          exit 1
