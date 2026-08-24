@@ -733,5 +733,19 @@ class TestIdempotence(TempWiki):
         self.assertEqual(self.snapshot(), after_one, "second run must be byte-identical")
 
 
+class TestShippedCopy(unittest.TestCase):
+    def test_skill_ships_an_identical_finalizer(self):
+        """The skill folder carries its own copy for installed-skill runs.
+
+        Editing scripts/openwiki-finalize.py without refreshing the twin would
+        make installed skills silently run stale finalize logic.
+        """
+        repo = pathlib.Path(__file__).parent.parent
+        canonical = repo / "scripts" / "openwiki-finalize.py"
+        shipped = repo / ".agents" / "skills" / "openwiki" / "scripts" / "openwiki-finalize.py"
+        self.assertTrue(shipped.exists(), "missing shipped copy: %s" % shipped)
+        self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

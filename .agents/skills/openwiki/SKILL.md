@@ -471,11 +471,12 @@ Run it BEFORE Step 4 — its writes must land inside the snapshot window, or the
 will not see them. It is idempotent, so a genuine no-op run leaves every file byte-identical and
 Step 4 correctly writes nothing.
 
-This step needs `scripts/openwiki-finalize.py`, which ships beside the skill. When the skill is
-installed globally at `~/.agents/skills/openwiki/`, copy the script there too and call it by
-absolute path. If the script is genuinely unavailable, say so in your final message and skip the
-step — do not hand-write front matter or indexes, which would be non-deterministic and would
-break the no-op contract.
+This step needs `openwiki-finalize.py`, which ships beside this `SKILL.md` at
+`scripts/openwiki-finalize.py`; call it by absolute path. When running inside a checkout of this
+repository rather than an installed copy, the identical script also lives at the repository root
+(`scripts/openwiki-finalize.py`) — use whichever applies. If neither is found, say so in your final
+message and skip the step — do not hand-write front matter or indexes, which would be
+non-deterministic and would break the no-op contract.
 
 ## Step 4 — Persist metadata (idempotence, run AFTER the wiki work)
 
