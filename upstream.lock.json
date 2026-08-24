@@ -1,28 +1,43 @@
 {
   "upstream": "langchain-ai/openwiki",
-  "trackedRef": "0.0.4",
-  "trackedVersion": "0.0.4",
+  "trackedRef": "v0.3.3",
+  "trackedVersion": "0.3.3",
   "comment": "The upstream files this port reproduces, hashed at trackedRef. Regenerate with: sh scripts/check-upstream-drift.sh --update. A file recorded as GONE does not exist at trackedRef; it is listed because the port must eventually cover it.",
   "files": {
+    "src/agent/index.ts": {
+      "sha256": "9cb36eacec7df71ac2ab2205d80c96bd3a8af60321eca5247c82c5de14b176b3",
+      "bytes": 61637,
+      "why": "the run lifecycle: snapshot before, no-op decision, metadata write after"
+    },
     "src/agent/prompt.ts": {
-      "sha256": "fdb529b839167e89effc91b762fe0907799b9b3c42214e69f5419b78eadb8096",
-      "bytes": 17917,
+      "sha256": "6c81cad1bab9863e147afaee39464ca6dbee5a195d9d14b66a3f6bb104bc13e3",
+      "bytes": 9129,
       "why": "the verbatim system prompt reproduced in commands/wiki.md Step 3 and SKILL.md"
     },
     "src/agent/prompts/code.ts": {
-      "sha256": "GONE",
-      "bytes": 0,
-      "why": "upstream moved the prompt bodies here after 0.0.4; the port does not cover it yet"
+      "sha256": "4f95d78b2a253c3d36d8149d50473e2c277ab7f57f92ab5034eda0107c33690a",
+      "bytes": 51171,
+      "why": "CODE_SYSTEM_PROMPTS.init and .update, reproduced verbatim in commands/wiki.md Step 3 and SKILL.md"
     },
     "src/agent/utils.ts": {
-      "sha256": "0d9eeca0d47867a51341ee06f85739be76cdf82bd8594e5b4ae868138daeaacb",
-      "bytes": 9894,
+      "sha256": "0e89f74b0b2bd3c34f70f2060b71ad13bd15156c7b5f7efb1bba6cd37003ba36",
+      "bytes": 14768,
       "why": "git-evidence commands, getUpdateNoopStatus, and the .last-update.json shape used by commands/wiki.md and hooks/openwiki-gate.sh"
     },
-    "src/agent/index.ts": {
-      "sha256": "4c853ff8353186edc15b53e20a7e6bfc3f60928c33ccb297c82cdcfbb523539e",
-      "bytes": 28887,
-      "why": "the run lifecycle: snapshot before, no-op decision, metadata write after"
+    "src/okf/frontmatter.ts": {
+      "sha256": "8e3f11c3fb53cc830c5141af0a1956fb373f62b798aa88f8e732c6bead57d4db",
+      "bytes": 12416,
+      "why": "OKF front matter validation and deriveMinimalFrontmatter, reproduced by pass 1 of scripts/openwiki-finalize.py"
+    },
+    "src/okf/index-sync.ts": {
+      "sha256": "869c524c0b324c2a51794fc124c1028aa486fe34e5506c50d0713c3e9326e291",
+      "bytes": 8932,
+      "why": "synchronizeWikiIndexes, reproduced by pass 2 of scripts/openwiki-finalize.py"
     }
+  },
+  "notCovered": {
+    "src/agent/prompts/personal.ts": "personal-wiki output mode (outputMode: local-wiki); a different product from repository documentation",
+    "CODE_SYSTEM_PROMPTS.chat": "interactive chat; this port auto-routes between init and update instead",
+    "--language flag": "no slash-command equivalent, so language is omitted from run metadata"
   }
 }

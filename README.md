@@ -142,8 +142,14 @@ OpenWiki's context compaction — the main thread never loads the whole repo.
 every section). Section directories are created one per major domain, ≤ 8 pages on init, no stub
 pages. Small repos get quickstart plus 1–2 pages.
 
-**Wiring.** A short `## OpenWiki` reference section is added to top-level `AGENTS.md` / `CLAUDE.md`
-(the wiki is never inlined). If neither exists, `AGENTS.md` is created with just that section.
+**Wiring — this changed in `v0.3.3`.** Earlier upstream (and earlier versions of this port) added
+a short `## OpenWiki` reference section to top-level `AGENTS.md` / `CLAUDE.md`, creating
+`AGENTS.md` if neither existed. Upstream reversed that: the `update` prompt now states "Do not
+create or update repository `/AGENTS.md` or `/CLAUDE.md` files during normal code wiki runs" —
+everything stays under `/openwiki`, and an existing `AGENTS.md` / `CLAUDE.md` is left untouched.
+If you're upgrading from an earlier version, do not expect your `AGENTS.md` to keep getting
+updated; it won't. Upstream also adds `/openwiki/INSTRUCTIONS.md`, a user-authored brief the
+agent reads for scope and priorities but never writes to during a normal run.
 
 **Idempotence.** The agent snapshots `openwiki/` content (excluding `.last-update.json`) with a
 SHA-256 hash before and after the run:
@@ -223,22 +229,42 @@ Copy the script under `.claude/hooks/` and wire it in `.claude/settings.json`:
 
 ## Fidelity to upstream
 
-**Tracked against upstream `0.0.4`. Upstream is at `v0.3.3` — this port is behind.**
-The reproduced surface was byte-identical from `0.0.2` through `0.0.4`, but every tracked file has
-changed since:
+**Tracked against upstream `v0.3.3`, repository output mode.** The reproduced surface is the
+`init` and `update` system prompts (`src/agent/prompts/code.ts` → `CODE_SYSTEM_PROMPTS`), the
+prompt assembly and link-integrity appendix (`src/agent/prompt.ts`), and the git evidence,
+no-op, snapshot and metadata logic (`src/agent/utils.ts`). Prompt text is extracted from upstream
+with [`scripts/extract-upstream-prompt.py`](scripts/extract-upstream-prompt.py) rather than
+retyped, so transcription drift is not possible.
 
-| Upstream file | At `0.0.4` | At `v0.3.3` | What it means here |
-|---|---|---|---|
-| `src/agent/prompt.ts` | 17,917 B | 9,129 B | The prompt bodies moved out to `src/agent/prompts/code.ts` (51 KB) and `personal.ts` (75 KB). The prompt reproduced in `commands/wiki.md` is stale. |
-| `src/agent/utils.ts` | 9,894 B | 14,768 B | Git log/diff construction left this file; `.last-update.json` gained `status` and an optional `language`, and `gitHead` is now written only when `outputMode` is `repository`. |
-| `src/agent/index.ts` | 28,887 B | 61,637 B | The run lifecycle grew a skeleton critic, link validation, and QA subagents. |
+**Deliberately not covered**, and recorded as such in
+[`upstream.lock.json`](upstream.lock.json):
 
-Upstream also added subsystems this port does not cover at all: `openwiki-ignore.ts`,
-`wiki-link-validator.ts`, `wiki-qa-subagents.ts`, `skeleton-critic.ts`, `wiki-finalizer.ts`,
-`translation-middleware.ts`, and the `personal` output mode.
+| Upstream surface | Why not |
+|---|---|
+| `src/agent/prompts/personal.ts` | The personal-wiki output mode (`outputMode: "local-wiki"`). A different product from documenting a repository. |
+| `CODE_SYSTEM_PROMPTS.chat` | Interactive chat. This port auto-routes between `init` and `update`; a plugin slash command is always namespaced. |
+| `--language` | No slash-command equivalent, so `language` is omitted from run metadata rather than faked. |
+| `translation-middleware.ts`, `skills.ts`, `crash-guard.ts`, `vertex-surface.ts`, `openai-chatgpt-oauth.ts` | Harness plumbing the host already provides. |
 
-Re-porting that surface is tracked work. Until it lands, treat this port as an implementation of
-OpenWiki `0.0.4`, not of current upstream.
+**Outstanding.** Upstream's named subagents — `src/agent/skeleton_critic.ts`,
+`src/agent/wiki_qa_subagents.ts` (`wiki_question_finder`, `wiki_answer_verifier`) — were redirected
+to generic subagent briefs in this port rather than ported verbatim, because their actual system
+prompts live in upstream harness code that was not extracted here. Porting those prompts is
+tracked work, listed so it stays visible instead of silently missing. `src/agent/wiki-link-validator.ts`
+and the OKF work under `src/okf/` (`frontmatter.ts`, `index-sync.ts`, `index-labels.ts`), by
+contrast, are reproduced.
+
+### OKF front matter
+
+From `v0.3.3`, every generated page carries YAML front matter following the Google Knowledge
+Catalog OKF v0.1 schema — `type` is required, `title` and `description` are recommended, and
+producer-defined extension fields are valid and preserved across runs. `index.md` and `log.md` are
+reserved and never receive it.
+
+If you already have an `openwiki/` from an earlier version, no migration step is needed. Front
+matter is additive, and [`scripts/openwiki-finalize.py`](scripts/openwiki-finalize.py) backfills
+it on the next run, tagging anything it inferred with `openwiki_generated: true` so a later run
+can replace the guess with a real description. Nothing is deleted.
 
 ### Detecting drift
 
@@ -261,9 +287,9 @@ the alarm. Requires `jq` and `curl`; set `GITHUB_TOKEN` to raise the API rate li
 Monday and keeps a single issue in sync with the report, closing it when the port catches up. It
 also runs on pull requests that touch the lock or the script, so a hand-edited lock fails the PR.
 
-**Taken verbatim:** the full system prompt (`src/agent/prompt.ts`), the `## OpenWiki` section,
-the git commands (`src/agent/utils.ts`), the `.last-update.json` shape, and the snapshot / no-op
-logic (`src/agent/index.ts`).
+**Taken verbatim:** the full system prompt (`src/agent/prompt.ts`), the `init`/`update` prompt
+bodies (`src/agent/prompts/code.ts`), the git commands (`src/agent/utils.ts`), the
+`.last-update.json` shape, and the snapshot / no-op logic (`src/agent/index.ts`).
 
 **Adapted (and why):** DeepAgents virtual-filesystem tools and paths → native Read/Write/Edit/
 Glob/Grep/Bash on real repo paths; the DeepAgents "task tool" → Claude Code subagents; the
@@ -290,6 +316,9 @@ hooks/
   test_gate.sh       # self-check for the gate
 scripts/
   check-upstream-drift.sh  # re-hashes the upstream files this port reproduces
+  extract-upstream-prompt.py  # pulls prompt text from upstream, verbatim
+  openwiki-finalize.py     # Step 3b: OKF front matter, indexes, link integrity
+  test_finalize.py         # finalizer test suite
 upstream.lock.json   # the upstream ref + per-file SHA-256 the port is ported from
 .github/workflows/
   upstream-drift.yml # weekly drift check; keeps one issue in sync
