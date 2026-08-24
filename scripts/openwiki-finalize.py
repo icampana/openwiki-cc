@@ -251,8 +251,22 @@ MARKER_PREFIX = "openwiki: broken internal link"
 # parser and risks false positives, which corrupt good content.
 LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)\)")
 # No DOTALL: markers are single-line, and spanning lines could eat real content.
-# Match with leading \n (added by split/join separator) and optional trailing \r if file uses CRLF.
-MARKER_RE = re.compile(r"\n[ \t]*<!--\s*%s[^\n]*?-->\r?" % re.escape(MARKER_PREFIX))
+#
+# Two alternatives, not one shared pattern, because the two cases remove a different
+# number of newline bytes:
+#   - Mid-text: "\n<marker>\r?" -- the leading \n is the separator INSERTED between a
+#     content line and its marker; the marker's own trailing newline is the ORIGINAL
+#     separator to whatever follows and must stay uncaptured. Only an optional \r
+#     (present when the marker line was manufactured to match a CRLF file) is consumed
+#     after it, never the \n.
+#   - Start-of-text: "^<marker>\r?\n?" -- a marker can sit at byte 0 (hand-authored, a
+#     manual edit, or output from an older version of this script) with no preceding
+#     newline to consume. There the marker's entire own line terminator (\r?\n?) is the
+#     one byte-string that was added along with it, so it must be consumed in full or a
+#     stray blank line is left behind. re.MULTILINE is deliberately NOT set, so ^ only
+#     ever matches the start of the whole string -- never the start of every line.
+_MARKER_BODY = r"[ \t]*<!--\s*%s[^\n]*?-->" % re.escape(MARKER_PREFIX)
+MARKER_RE = re.compile(r"\n%s\r?|^%s\r?\n?" % (_MARKER_BODY, _MARKER_BODY))
 ATX_RE = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 
 

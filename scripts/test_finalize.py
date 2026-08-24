@@ -413,6 +413,63 @@ class TestLinks(TempWiki):
             second = f.read()
         self.assertEqual(second, after, "Second run must be byte-identical")
 
+    def test_stray_marker_at_byte_zero_does_not_accumulate(self):
+        """A hand-authored/older-version marker sitting at offset 0 (no preceding
+        newline) must still be stripped and regenerated cleanly, not stacked."""
+        original = (
+            "<!-- %s: missing.md - target not found -->\n"
+            "# A\n\n[gone](missing.md)\n" % MARKER
+        )
+        p = self.write("a.md", original)
+
+        finalize.pass_links(self.wiki)
+        first = p.read_text(encoding="utf-8")
+        self.assertEqual(first.count(MARKER), 1)
+        self.assertIn("[gone](missing.md)", first)
+
+        finalize.pass_links(self.wiki)
+        second = p.read_text(encoding="utf-8")
+        self.assertEqual(second, first)
+        self.assertEqual(second.count(MARKER), 1)
+
+    def test_stray_marker_at_byte_zero_clears_once_target_exists(self):
+        """Self-correction must also work when the stray marker starts the file."""
+        original = (
+            "<!-- %s: b.md - target not found -->\n"
+            "# A\n\n[b](b.md)\n" % MARKER
+        )
+        p = self.write("a.md", original)
+
+        finalize.pass_links(self.wiki)
+        self.assertIn(MARKER, p.read_text(encoding="utf-8"))
+
+        self.write("b.md", "# B\n\nBody.\n")
+        finalize.pass_links(self.wiki)
+        after = p.read_text(encoding="utf-8")
+        self.assertNotIn(MARKER, after)
+        self.assertIn("[b](b.md)", after)
+
+    def test_stray_marker_at_byte_zero_crlf(self):
+        """Same stray-marker-at-offset-0 case, but in CRLF form."""
+        original = (
+            "<!-- %s: missing.md - target not found -->\r\n"
+            "# A\r\n\r\n[gone](missing.md)\r\n" % MARKER
+        )
+        p = self.write("a.md", original)
+
+        finalize.pass_links(self.wiki)
+        with open(p, encoding="utf-8", newline="") as f:
+            first = f.read()
+        self.assertEqual(first.count(MARKER), 1)
+        self.assertIn("\r\n", first)
+        self.assertNotIn("\n", first.replace("\r\n", ""))  # no bare-LF snuck in
+
+        finalize.pass_links(self.wiki)
+        with open(p, encoding="utf-8", newline="") as f:
+            second = f.read()
+        self.assertEqual(second, first, "Second run must be byte-identical")
+        self.assertEqual(second.count(MARKER), 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
