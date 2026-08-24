@@ -231,6 +231,80 @@ class TestLinks(TempWiki):
         finalize.pass_links(self.wiki)
         self.assertNotIn(MARKER, p.read_text(encoding="utf-8"))
 
+    def test_idempotence_with_no_trailing_newline(self):
+        """FIX 1: File with no trailing newline must remain byte-identical on re-run."""
+        p = self.write("a.md", "# A\n\n[gone](missing.md)")  # no trailing \n
+        finalize.pass_links(self.wiki)
+        first = p.read_text(encoding="utf-8")
+        finalize.pass_links(self.wiki)
+        second = p.read_text(encoding="utf-8")
+        self.assertEqual(second, first, "Second run must be byte-identical")
+        # Verify marker is present and appears only once
+        self.assertIn(MARKER, first)
+        self.assertEqual(first.count(MARKER), 1)
+
+    def test_links_in_frontmatter_are_not_annotated(self):
+        """FIX 2: Broken links inside YAML frontmatter should be ignored."""
+        p = self.write("a.md",
+            "---\n"
+            "type: Reference\n"
+            "title: Test\n"
+            "description: See [broken](nope.md) link\n"
+            "---\n\n"
+            "# A\n\n[valid](b.md)\n"
+        )
+        self.write("b.md", "# B\n\nBody.\n")
+        finalize.pass_links(self.wiki)
+        out = p.read_text(encoding="utf-8")
+        # The broken link in frontmatter must NOT get a marker; frontmatter is unchanged
+        frontmatter = out.split("---")[1]
+        self.assertIn("description: See [broken](nope.md) link", frontmatter)
+        self.assertNotIn(MARKER, frontmatter)
+        # Overall file has no markers (valid body link, ignored frontmatter)
+        self.assertNotIn(MARKER, out)
+
+    def test_links_in_fenced_code_blocks_are_not_annotated(self):
+        """FIX 3: Links inside fenced code blocks should not be annotated."""
+        p = self.write("a.md",
+            "# A\n\n"
+            "Example:\n\n"
+            "```markdown\n"
+            "[broken](missing.md)\n"
+            "```\n\n"
+            "[valid](b.md)\n"
+        )
+        self.write("b.md", "# B\n\nBody.\n")
+        finalize.pass_links(self.wiki)
+        out = p.read_text(encoding="utf-8")
+        # The broken link inside the fence should NOT get a marker
+        lines = out.split("\n")
+        fence_section = "\n".join(lines[3:6])  # The ``` ... ``` part
+        self.assertNotIn(MARKER, fence_section)
+        # Overall file should have no marker since only the fenced link is broken
+        self.assertNotIn(MARKER, out)
+
+    def test_duplicate_headings_are_disambiguated(self):
+        """FIX 4: Duplicate heading slugs should be disambiguated like GitHub."""
+        self.write("b.md",
+            "# B\n\n"
+            "## Dup\n\n"
+            "First duplicate.\n\n"
+            "## Dup\n\n"
+            "Second duplicate.\n\n"
+            "## Dup\n\n"
+            "Third duplicate.\n"
+        )
+        p = self.write("a.md",
+            "# A\n\n"
+            "[first](b.md#dup)\n"
+            "[second](b.md#dup-1)\n"
+            "[third](b.md#dup-2)\n"
+        )
+        finalize.pass_links(self.wiki)
+        out = p.read_text(encoding="utf-8")
+        # All three links should be valid (GitHub-style disambiguation)
+        self.assertNotIn(MARKER, out)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

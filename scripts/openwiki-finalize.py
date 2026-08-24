@@ -246,9 +246,13 @@ def pass_indexes(wiki):
 
 
 MARKER_PREFIX = "openwiki: broken internal link"
+# LINK_RE does not match nested brackets like [a [b] c](url); such links go unflagged.
+# A missed annotation is benign. Handling arbitrary nesting would require a full Markdown
+# parser and risks false positives, which corrupt good content.
 LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)\)")
 # No DOTALL: markers are single-line, and spanning lines could eat real content.
-MARKER_RE = re.compile(r"[ \t]*<!--\s*%s[^\n]*?-->\n?" % re.escape(MARKER_PREFIX))
+# Match with optional leading newline to handle markers on their own line (added by split/join).
+MARKER_RE = re.compile(r"(?:\n)?[ \t]*<!--\s*%s[^\n]*?-->" % re.escape(MARKER_PREFIX))
 ATX_RE = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 
 
@@ -260,8 +264,23 @@ def slugify(heading):
 
 
 def headings(text):
+    """Return set of GitHub-style disambiguated heading slugs.
+
+    When multiple headings slugify identically, they are numbered:
+    first is 'dup', second is 'dup-1', third is 'dup-2', etc.
+    """
     _, body = split_frontmatter(text)
-    return {slugify(m.group(2)) for m in ATX_RE.finditer(body)}
+    slugs = []
+    seen = {}
+    for m in ATX_RE.finditer(body):
+        slug = slugify(m.group(2))
+        if slug not in seen:
+            seen[slug] = 0
+            slugs.append(slug)
+        else:
+            seen[slug] += 1
+            slugs.append(f"{slug}-{seen[slug]}")
+    return set(slugs)
 
 
 def strip_markers(text):
@@ -282,43 +301,71 @@ def pass_links(wiki):
         original = path.read_text(encoding="utf-8")
         text = strip_markers(original)
         had_markers = text != original
+
+        # Split frontmatter from body so we only process body links
+        fm_text, body = split_frontmatter(text)
+        had_frontmatter = fm_text is not None
+
         found_problem = False
         out_lines = []
+        in_fence = False
         # split("\n"), not splitlines(): split is lossless on trailing
         # newlines, so an untouched file round-trips byte-identically.
-        for line in text.split("\n"):
+        for line in body.split("\n"):
+            # Track fence state
+            stripped = line.strip()
+            if stripped.startswith(FENCE):
+                in_fence = not in_fence
+
             out_lines.append(line)
             problems = []
-            for match in LINK_RE.finditer(line):
-                href = match.group("href")
-                if not _is_internal(href):
-                    continue
-                target_part, _, anchor = href.partition("#")
-                if not target_part:
-                    continue
-                target = (path.parent / target_part).resolve()
-                if not target.exists():
-                    problems.append((href, "target not found"))
-                    continue
-                if anchor and target.suffix == ".md":
-                    try:
-                        target_text = target.read_text(encoding="utf-8")
-                    except (OSError, UnicodeDecodeError):
-                        problems.append((href, "heading anchor not found"))
+
+            # Only process links outside of fenced code blocks
+            if not in_fence:
+                for match in LINK_RE.finditer(line):
+                    href = match.group("href")
+                    if not _is_internal(href):
                         continue
-                    if slugify(anchor) not in headings(target_text):
-                        problems.append((href, "heading anchor not found"))
+                    target_part, _, anchor = href.partition("#")
+                    if not target_part:
+                        continue
+                    target = (path.parent / target_part).resolve()
+                    if not target.exists():
+                        problems.append((href, "target not found"))
+                        continue
+                    if anchor and target.suffix == ".md":
+                        try:
+                            target_text = target.read_text(encoding="utf-8")
+                        except (OSError, UnicodeDecodeError):
+                            problems.append((href, "heading anchor not found"))
+                            continue
+                        if slugify(anchor) not in headings(target_text):
+                            problems.append((href, "heading anchor not found"))
+
             indent = line[: len(line) - len(line.lstrip())]
             for href, reason in problems:
                 found_problem = True
                 out_lines.append(
                     "%s<!-- %s: %s - %s -->" % (indent, MARKER_PREFIX, href, reason)
                 )
+
         # A file with nothing to say is left completely alone. Normalizing it
         # would count as a change and break the no-op contract.
         if not found_problem and not had_markers:
             continue
-        updated = "\n".join(out_lines)
+
+        # Reconstruct with proper line ending handling (preserve LF vs CRLF)
+        updated_body = "\n".join(out_lines)
+        if had_frontmatter:
+            # Detect line ending from fm_text to preserve LF vs CRLF
+            if fm_text.endswith("\r\n"):
+                newline = "\r\n"
+            else:
+                newline = "\n"
+            updated = f"---{newline}{fm_text}---{newline}{updated_body}"
+        else:
+            updated = updated_body
+
         if updated != original:
             path.write_text(updated, encoding="utf-8")
             changed.append(str(path))
