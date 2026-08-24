@@ -164,6 +164,60 @@ def pass_frontmatter(wiki):
     return changed
 
 
+ROOT_INDEX_FRONTMATTER = '---\nokf_version: "0.1"\n---\n\n'
+
+
+def index_label(path):
+    """Human label for an index entry: the page's H1, else its filename."""
+    try:
+        _, body = split_frontmatter(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return path.stem.replace("-", " ").title()
+    return derive_title(body) or path.stem.replace("-", " ").title()
+
+
+def _escape_label(label):
+    return label.replace("[", "\\[").replace("]", "\\]")
+
+
+def render_index(directory, wiki):
+    """Render a directory index. Deterministic: entries are sorted by href."""
+    entries = []
+    for child in sorted(directory.iterdir(), key=lambda p: p.name):
+        if child.is_dir():
+            if any(child.rglob("*.md")):
+                entries.append((
+                    "%s/index.md" % child.name,
+                    child.name.replace("-", " ").title(),
+                ))
+        elif child.suffix == ".md" and child.name not in RESERVED:
+            entries.append((child.name, index_label(child)))
+
+    is_root = directory.resolve() == wiki.resolve()
+    title = "OpenWiki" if is_root else directory.name.replace("-", " ").title()
+    lines = ["# %s" % title, ""]
+    lines += ["- [%s](%s)" % (_escape_label(label), href)
+              for href, label in sorted(entries)]
+    body = "\n".join(lines) + "\n"
+    return (ROOT_INDEX_FRONTMATTER + body) if is_root else body
+
+
+def pass_indexes(wiki):
+    """Generate index.md for the wiki root and every directory holding pages."""
+    changed = []
+    directories = [wiki] + [d for d in sorted(wiki.rglob("*")) if d.is_dir()]
+    for directory in directories:
+        if not any(directory.rglob("*.md")):
+            continue
+        target = directory / "index.md"
+        rendered = render_index(directory, wiki)
+        existing = target.read_text(encoding="utf-8") if target.exists() else None
+        if existing != rendered:
+            target.write_text(rendered, encoding="utf-8")
+            changed.append(str(target))
+    return changed
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("wiki", nargs="?", default="openwiki")
@@ -174,9 +228,10 @@ def main():
         print("openwiki-finalize: no such directory: %s (nothing to do)" % wiki)
         return 0
 
-    changed = pass_frontmatter(wiki)
-    print("openwiki-finalize: front matter written to %d file(s)" % len(changed))
-    for path in changed:
+    fm = pass_frontmatter(wiki)
+    idx = pass_indexes(wiki)
+    print("openwiki-finalize: front matter %d, indexes %d" % (len(fm), len(idx)))
+    for path in fm + idx:
         print("  + %s" % path)
     return 0
 

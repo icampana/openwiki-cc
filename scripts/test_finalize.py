@@ -118,5 +118,40 @@ class TestFrontmatter(TempWiki):
         self.assertTrue(out.startswith("---\n"))
 
 
+class TestIndexes(TempWiki):
+    def test_root_index_carries_okf_version_only(self):
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        finalize.pass_indexes(self.wiki)
+        out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertTrue(out.startswith('---\nokf_version: "0.1"\n---\n'))
+        self.assertIn("- [Quickstart](quickstart.md)", out)
+
+    def test_subdirectory_index_has_no_frontmatter(self):
+        self.write("arch/overview.md", "# Overview\n\nText.\n")
+        finalize.pass_indexes(self.wiki)
+        out = (self.wiki / "arch" / "index.md").read_text(encoding="utf-8")
+        self.assertFalse(out.startswith("---"))
+        self.assertIn("- [Overview](overview.md)", out)
+
+    def test_root_index_links_subdirectories(self):
+        self.write("arch/overview.md", "# Overview\n\nText.\n")
+        finalize.pass_indexes(self.wiki)
+        out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertIn("- [Arch](arch/index.md)", out)
+
+    def test_label_falls_back_to_filename_when_no_h1(self):
+        self.write("no-heading.md", "Just prose, no heading.\n")
+        finalize.pass_indexes(self.wiki)
+        out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertIn("- [No Heading](no-heading.md)", out)
+
+    def test_entries_are_sorted_for_stability(self):
+        self.write("b.md", "# Bee\n\nx\n")
+        self.write("a.md", "# Ay\n\nx\n")
+        finalize.pass_indexes(self.wiki)
+        out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertLess(out.index("(a.md)"), out.index("(b.md)"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
