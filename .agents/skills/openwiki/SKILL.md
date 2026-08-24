@@ -290,7 +290,7 @@ Planning discipline:
 - After discovery and before writing final documentation, create the temporary /openwiki/_plan.md file. Use the affected-system inventory described above. Keep every affected or newly discovered component and workflow disposition explicit, with its intended page, section, and primary source evidence.
 - Record each relationship as source concept -> relationship meaning -> target concept so cross-links are designed before pages are written.
 - Revisit the plan after initial discovery and again after drafting. Expand or reorganize it when evidence reveals additional systems, workflows, relationships, contradictions, or gaps.
-- Use /openwiki/_plan.md with filesystem tools. It is removed automatically after the run, so do not delete it or link to it from wiki pages.
+- Use /openwiki/_plan.md with filesystem tools. **[adapted]** Upstream removes it automatically after the run; this port has no such runtime, so delete /openwiki/_plan.md yourself before finishing, and never link to it from wiki pages.
 
 Index discipline:
 - Directory index.md files are generated deterministically after the run. Do not create or edit them yourself.
@@ -425,7 +425,7 @@ Diagram discipline:
 - Ground every diagram in inspected source. Do not invent participants, states, entities, or relationships the code does not support.
 - Keep diagrams accurate on update runs. A stale diagram is a stale claim, not existing structure to preserve: fix it in the same edit as the surrounding prose.
 - Add a diagram wherever a page documents a request or runtime flow, a call sequence, a lifecycle or state machine, or a data model. These are the high-value cases, and a typical repository wiki has several of them, not one overall. Skip pages that are navigation, reference tables, or configuration. Prefer a few strong diagrams over decorating every page, give each a one-line caption. **[adapted]** Consult a mermaid-diagrams skill for label-safety rules if the host provides one; otherwise apply Mermaid label-safety rules directly (quote labels with special characters, avoid unescaped parentheses/pipes in node text) without depending on the skill's availability.
-- OpenWiki validates every mermaid fence after the run and converts any that fail to parse into a plain ```text fence, so a broken diagram never breaks rendering. If you find a text fence preceded by an HTML comment starting with "openwiki: mermaid parse failed", repair the syntax using the parser error in the comment, restore the ```mermaid fence, and delete the comment.
+- **[adapted]** Upstream OpenWiki validates every mermaid fence after the run and converts any that fail to parse into a plain ```text fence, annotated with an HTML comment starting with "openwiki: mermaid parse failed". This port has no such validator: write valid Mermaid syntax up front, since no post-run check exists and you will not see those comments.
 
 
 Mode-specific behavior:

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Tests for openwiki-finalize.py. Run: python3 scripts/test_finalize.py"""
+import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -81,6 +83,13 @@ class TestFrontmatter(TempWiki):
         finalize.pass_frontmatter(self.wiki)
         self.assertNotIn("type:", i.read_text(encoding="utf-8"))
         self.assertNotIn("type:", l.read_text(encoding="utf-8"))
+
+    def test_plan_file_gets_no_frontmatter(self):
+        """FIX 1: _plan.md is a scratch file the agent deletes itself; the
+        finalizer must never treat it as a concept page."""
+        plan = self.write("_plan.md", "# Plan\n\nscratch notes\n")
+        finalize.pass_frontmatter(self.wiki)
+        self.assertNotIn("type:", plan.read_text(encoding="utf-8"))
 
     def test_crlf_frontmatter_is_byte_identical(self):
         """A valid CRLF file should not be modified."""
@@ -176,6 +185,48 @@ class TestIndexes(TempWiki):
         self.assertIn("- [Quickstart](quickstart.md)", parent_out)
         # Orphaned index should still exist (not deleted) but not be regenerated
         self.assertTrue((self.wiki / "arch" / "index.md").exists())
+
+    def test_plan_file_is_never_an_index_entry_or_counted_as_content(self):
+        """FIX 1: _plan.md must not appear in any index, and a directory
+        holding only _plan.md must not be treated as having real content."""
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("_plan.md", "# Plan\n\nscratch notes\n")
+        self.write("scratch/_plan.md", "# Plan\n\nscratch notes\n")
+        finalize.pass_indexes(self.wiki)
+        root_out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertNotIn("_plan", root_out)
+        self.assertNotIn("scratch", root_out)
+        # A directory holding only _plan.md has no real content: no index.
+        self.assertFalse((self.wiki / "scratch" / "index.md").exists())
+
+    def test_parenthesized_and_spaced_filenames_get_resolvable_hrefs(self):
+        """FIX 5: render_index must not author a broken href for filenames
+        containing '(', ')' or a space."""
+        self.write("foo(1).md", "# Foo One\n\nBody.\n")
+        self.write("has space.md", "# Has Space\n\nBody.\n")
+        finalize.pass_indexes(self.wiki)
+        out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertIn("(foo%281%29.md)", out)
+        self.assertIn("(has%20space.md)", out)
+
+    def test_symlinked_directory_is_skipped_and_does_not_escape_wiki(self):
+        """FIX 6: a symlinked directory inside the wiki must not get an
+        index.md written through the symlink into the target outside
+        openwiki/."""
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (outside / "page.md").write_text("# Page\n\nBody.\n", encoding="utf-8")
+        link = self.wiki / "linkdir"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported on this platform/filesystem")
+
+        finalize.pass_indexes(self.wiki)
+
+        self.assertFalse((outside / "index.md").exists(),
+                          "must never write outside openwiki/")
+        self.assertFalse((self.wiki / "linkdir" / "index.md").exists())
 
 
 MARKER = "openwiki: broken internal link"
@@ -470,6 +521,32 @@ class TestLinks(TempWiki):
         self.assertEqual(second, first, "Second run must be byte-identical")
         self.assertEqual(second.count(MARKER), 1)
 
+    def test_marker_shaped_comment_in_fence_survives_stripping(self):
+        """FIX 2: a marker-shaped HTML comment quoted inside a fenced code
+        block is content (e.g. documentation of the marker format itself)
+        and must be left byte-identical across runs, while a real marker
+        outside the fence is still stripped and correctly re-added."""
+        fenced_marker = "<!-- %s: missing.md - target not found -->" % MARKER
+        p = self.write("a.md",
+            "# A\n\n"
+            "This is what a marker looks like:\n\n"
+            "```html\n"
+            "%s\n"
+            "```\n\n"
+            "[gone](missing.md)\n" % fenced_marker
+        )
+        finalize.pass_links(self.wiki)
+        first = p.read_text(encoding="utf-8")
+        # The fenced marker-shaped comment must survive verbatim.
+        self.assertIn(fenced_marker, first)
+        # A real marker for the actual broken link must be added, exactly once.
+        self.assertEqual(first.count(MARKER), 2)  # one in the fence, one real
+
+        finalize.pass_links(self.wiki)
+        second = p.read_text(encoding="utf-8")
+        self.assertEqual(second, first, "Second run must be byte-identical")
+        self.assertIn(fenced_marker, second)
+
 
 class TestIdempotence(TempWiki):
     def snapshot(self):
@@ -532,6 +609,53 @@ class TestIdempotence(TempWiki):
         with open(good, encoding="utf-8", newline="") as f:
             out = f.read()
         self.assertTrue(out.startswith("---\n"), "sibling file must still be finalized: %r" % out)
+
+    def test_exit_zero_and_siblings_finalized_with_readonly_file(self):
+        """FIX 3: one unwritable file must cost only that file, not the run.
+        A read-only file that needs a change is skipped (with a message),
+        but every other file still gets finalized."""
+        good = self.write("quickstart.md", "# Quickstart\n\nBody.\n")
+        readonly = self.write("locked.md", "# Locked\n\nBody.\n")
+        readonly.chmod(stat.S_IREAD)
+        try:
+            r = self.run_cli()
+
+            self.assertEqual(r.returncode, 0)
+            with open(good, encoding="utf-8", newline="") as f:
+                out = f.read()
+            self.assertTrue(
+                out.startswith("---\n"),
+                "sibling file must still be finalized: %r" % out,
+            )
+            with open(readonly, encoding="utf-8", newline="") as f:
+                locked_out = f.read()
+            self.assertFalse(
+                locked_out.startswith("---\n"),
+                "read-only file must be skipped, not silently succeed",
+            )
+        finally:
+            # Restore write permission so tearDown's rmtree can clean up.
+            readonly.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+    def test_parenthesized_filename_is_a_true_no_op_second_run(self):
+        """FIX 5: a filename with parens/spaces must not cause the
+        indexes/links dance to repeat forever -- the second run must be a
+        true no-op, and no broken-link marker may appear."""
+        self.write("foo(1).md", "# Foo One\n\nBody.\n")
+        self.write("has space.md", "# Has Space\n\nBody.\n")
+
+        first = self.run_cli()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        after_one = self.snapshot()
+        self.assertNotIn("openwiki: broken internal link",
+                          after_one.get("index.md", ""))
+
+        second = self.run_cli()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        after_two = self.snapshot()
+
+        self.assertEqual(after_one, after_two)
+        self.assertIn("indexes 0, links 0", second.stdout)
 
 
 if __name__ == "__main__":

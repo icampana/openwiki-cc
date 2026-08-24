@@ -18,8 +18,9 @@ import argparse
 import pathlib
 import re
 import sys
+import urllib.parse
 
-RESERVED = {"index.md", "log.md"}
+RESERVED = {"index.md", "log.md", "_plan.md"}
 GENERATED_FIELD = "openwiki_generated"
 FALLBACK_TYPE = "Reference"
 
@@ -156,6 +157,23 @@ def read_text_or_none(path):
         return None
 
 
+def write_text_or_skip(path, content):
+    """Write a file with newline="" (see module docstring), reporting and
+    continuing on failure instead of raising.
+
+    One unwritable file (read-only, permissions, missing parent) must not
+    cost the whole wiki its finalize pass -- the same guarantee
+    read_text_or_none gives reads. Returns True on success, False on skip.
+    """
+    try:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(content)
+        return True
+    except OSError as exc:
+        print("openwiki-finalize: skipping write to %s (%s)" % (path, exc.__class__.__name__))
+        return False
+
+
 def markdown_files(wiki):
     return sorted(p for p in wiki.rglob("*.md") if p.is_file())
 
@@ -170,10 +188,7 @@ def pass_frontmatter(wiki):
         if text is None:
             continue
         updated = ensure_frontmatter(text, path.stem.replace("-", " ").title())
-        if updated != text:
-            # Use builtin open() with newline="" for Python 3.9+ compatibility
-            with open(path, "w", encoding="utf-8", newline="") as f:
-                f.write(updated)
+        if updated != text and write_text_or_skip(path, updated):
             changed.append(str(path))
     return changed
 
@@ -202,6 +217,22 @@ def _has_real_markdown(directory):
     return False
 
 
+_HREF_UNSAFE = " ()"
+
+
+def _encode_href(name):
+    """Percent-encode characters that would break a Markdown destination.
+
+    Applies only to hrefs this script authors itself (index entries), never
+    to hand-written prose links -- there, truncating an unbalanced paren
+    is existing, correct behavior and stays parked. A literal `(` or `)`
+    ends a Markdown destination early and a space splits it from an
+    optional title, so a self-generated href for `foo(1).md` must encode
+    them or the link it authors is broken from the moment it is written.
+    """
+    return "".join("%%%02X" % ord(c) if c in _HREF_UNSAFE else c for c in name)
+
+
 def render_index(directory, wiki):
     """Render a directory index. Deterministic: entries are sorted by href."""
     entries = []
@@ -209,11 +240,11 @@ def render_index(directory, wiki):
         if child.is_dir():
             if _has_real_markdown(child):
                 entries.append((
-                    "%s/index.md" % child.name,
+                    "%s/index.md" % _encode_href(child.name),
                     child.name.replace("-", " ").title(),
                 ))
         elif child.suffix == ".md" and child.name not in RESERVED:
-            entries.append((child.name, index_label(child)))
+            entries.append((_encode_href(child.name), index_label(child)))
 
     is_root = directory.resolve() == wiki.resolve()
     title = "OpenWiki" if is_root else directory.name.replace("-", " ").title()
@@ -228,7 +259,13 @@ def pass_indexes(wiki):
     """Generate index.md for the wiki root and every directory holding pages."""
     changed = []
     orphans = []
-    directories = [wiki] + [d for d in sorted(wiki.rglob("*")) if d.is_dir()]
+    # A symlinked directory can point outside the wiki (e.g.
+    # openwiki/linkdir -> ../outside); writing its index.md would then land
+    # outside openwiki/, violating the "writes only inside openwiki/"
+    # guarantee. Skip symlinks entirely -- real directories only.
+    directories = [wiki] + [
+        d for d in sorted(wiki.rglob("*")) if d.is_dir() and not d.is_symlink()
+    ]
     for directory in directories:
         target = directory / "index.md"
 
@@ -240,15 +277,9 @@ def pass_indexes(wiki):
             continue
 
         rendered = render_index(directory, wiki)
-        # Use builtin open() with newline="" for Python 3.9+ compatibility
-        existing = None
-        if target.exists():
-            with open(target, encoding="utf-8", newline="") as f:
-                existing = f.read()
+        existing = read_text_or_none(target) if target.exists() else None
 
-        if existing != rendered:
-            with open(target, "w", encoding="utf-8", newline="") as f:
-                f.write(rendered)
+        if existing != rendered and write_text_or_skip(target, rendered):
             changed.append(str(target))
 
     # Report orphaned indexes
@@ -263,23 +294,6 @@ MARKER_PREFIX = "openwiki: broken internal link"
 # A missed annotation is benign. Handling arbitrary nesting would require a full Markdown
 # parser and risks false positives, which corrupt good content.
 LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)\)")
-# No DOTALL: markers are single-line, and spanning lines could eat real content.
-#
-# Two alternatives, not one shared pattern, because the two cases remove a different
-# number of newline bytes:
-#   - Mid-text: "\n<marker>\r?" -- the leading \n is the separator INSERTED between a
-#     content line and its marker; the marker's own trailing newline is the ORIGINAL
-#     separator to whatever follows and must stay uncaptured. Only an optional \r
-#     (present when the marker line was manufactured to match a CRLF file) is consumed
-#     after it, never the \n.
-#   - Start-of-text: "^<marker>\r?\n?" -- a marker can sit at byte 0 (hand-authored, a
-#     manual edit, or output from an older version of this script) with no preceding
-#     newline to consume. There the marker's entire own line terminator (\r?\n?) is the
-#     one byte-string that was added along with it, so it must be consumed in full or a
-#     stray blank line is left behind. re.MULTILINE is deliberately NOT set, so ^ only
-#     ever matches the start of the whole string -- never the start of every line.
-_MARKER_BODY = r"[ \t]*<!--\s*%s[^\n]*?-->" % re.escape(MARKER_PREFIX)
-MARKER_RE = re.compile(r"\n%s\r?|^%s\r?\n?" % (_MARKER_BODY, _MARKER_BODY))
 ATX_RE = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 
 
@@ -310,9 +324,41 @@ def headings(text):
     return set(slugs)
 
 
-def strip_markers(text):
-    """Remove previously written markers so re-running cannot stack them."""
-    return MARKER_RE.sub("", text)
+_MARKER_LINE_RE = re.compile(r"^[ \t]*<!--\s*%s[^\n]*?-->\r?$" % re.escape(MARKER_PREFIX))
+
+
+def strip_markers_from_body(body):
+    """Remove previously written markers from a body, but only outside fences.
+
+    A marker-shaped HTML comment inside a fenced code block is content (e.g. a
+    page documenting the marker format itself), not a stale annotation, and
+    must survive untouched. Every real marker occupies a full line of its own
+    (see pass_links), so removal is line-based: drop lines that match the
+    marker pattern and are not currently inside a fence, using the same
+    fence-tracking rule as the link-scanning pass below (a fence closes only
+    with the character that opened it).
+    """
+    fence_char = None
+    had_markers = False
+    kept = []
+    for line in body.split("\n"):
+        stripped = line.lstrip()
+        is_fence_delim = stripped.startswith("```") or stripped.startswith("~~~")
+
+        if fence_char is None and _MARKER_LINE_RE.match(line):
+            had_markers = True
+            continue
+
+        kept.append(line)
+
+        if is_fence_delim:
+            fence_type = "```" if stripped.startswith("```") else "~~~"
+            if fence_char is None:
+                fence_char = fence_type[0]
+            elif fence_type[0] == fence_char:
+                fence_char = None
+
+    return "\n".join(kept), had_markers
 
 
 def _is_internal(href):
@@ -328,12 +374,12 @@ def pass_links(wiki):
         original = read_text_or_none(path)
         if original is None:
             continue
-        text = strip_markers(original)
-        had_markers = text != original
-
-        # Split frontmatter from body so we only process body links
-        fm_text, body = split_frontmatter(text)
+        # Split frontmatter from body so we only process body links, and so
+        # marker stripping never has to reason about the front matter block.
+        fm_text, original_body = split_frontmatter(original)
         had_frontmatter = fm_text is not None
+
+        body, had_markers = strip_markers_from_body(original_body)
 
         found_problem = False
         out_lines = []
@@ -367,7 +413,10 @@ def pass_links(wiki):
                     target_part, _, anchor = href.partition("#")
                     if not target_part:
                         continue
-                    target = (path.parent / target_part).resolve()
+                    # Undo the percent-encoding render_index applies to its own
+                    # generated hrefs (e.g. "foo%281%29.md" -> "foo(1).md") so
+                    # a self-authored link resolves against the real filename.
+                    target = (path.parent / urllib.parse.unquote(target_part)).resolve()
                     if not target.exists():
                         problems.append((href, "target not found"))
                         continue
@@ -407,10 +456,7 @@ def pass_links(wiki):
         else:
             updated = updated_body
 
-        if updated != original:
-            # Use builtin open() with newline="" to preserve CRLF/LF bytes
-            with open(path, "w", encoding="utf-8", newline="") as f:
-                f.write(updated)
+        if updated != original and write_text_or_skip(path, updated):
             changed.append(str(path))
     return changed
 
