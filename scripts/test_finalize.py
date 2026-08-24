@@ -152,6 +152,31 @@ class TestIndexes(TempWiki):
         out = (self.wiki / "index.md").read_text(encoding="utf-8")
         self.assertLess(out.index("(a.md)"), out.index("(b.md)"))
 
+    def test_orphaned_directory_index_is_not_regenerated_and_not_linked(self):
+        """Directory with real page -> index created. Delete page -> index orphaned, parent unlinks it."""
+        # Create a page in root and arch
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("arch/overview.md", "# Overview\n\nText.\n")
+        finalize.pass_indexes(self.wiki)
+        # Verify parent linked the arch directory
+        parent_out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertIn("- [Arch](arch/index.md)", parent_out)
+        # Verify arch/index.md was created
+        self.assertTrue((self.wiki / "arch" / "index.md").exists())
+
+        # Delete the real page from arch, leaving only the index
+        (self.wiki / "arch" / "overview.md").unlink()
+
+        # Run finalizer again
+        finalize.pass_indexes(self.wiki)
+        # Parent index should no longer link arch
+        parent_out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertNotIn("arch", parent_out)
+        # But root still links quickstart
+        self.assertIn("- [Quickstart](quickstart.md)", parent_out)
+        # Orphaned index should still exist (not deleted) but not be regenerated
+        self.assertTrue((self.wiki / "arch" / "index.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

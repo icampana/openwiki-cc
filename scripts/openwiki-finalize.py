@@ -180,12 +180,20 @@ def _escape_label(label):
     return label.replace("[", "\\[").replace("]", "\\]")
 
 
+def _has_real_markdown(directory):
+    """Check if directory has any non-reserved markdown files."""
+    for md_file in directory.rglob("*.md"):
+        if md_file.name not in RESERVED:
+            return True
+    return False
+
+
 def render_index(directory, wiki):
     """Render a directory index. Deterministic: entries are sorted by href."""
     entries = []
     for child in sorted(directory.iterdir(), key=lambda p: p.name):
         if child.is_dir():
-            if any(child.rglob("*.md")):
+            if _has_real_markdown(child):
                 entries.append((
                     "%s/index.md" % child.name,
                     child.name.replace("-", " ").title(),
@@ -205,16 +213,34 @@ def render_index(directory, wiki):
 def pass_indexes(wiki):
     """Generate index.md for the wiki root and every directory holding pages."""
     changed = []
+    orphans = []
     directories = [wiki] + [d for d in sorted(wiki.rglob("*")) if d.is_dir()]
     for directory in directories:
-        if not any(directory.rglob("*.md")):
-            continue
         target = directory / "index.md"
+
+        # Check if directory has real (non-reserved) markdown
+        if not _has_real_markdown(directory):
+            # If index.md exists but directory has no real pages, it's orphaned
+            if target.exists():
+                orphans.append(str(target))
+            continue
+
         rendered = render_index(directory, wiki)
-        existing = target.read_text(encoding="utf-8") if target.exists() else None
+        # Use builtin open() with newline="" for Python 3.9+ compatibility
+        existing = None
+        if target.exists():
+            with open(target, encoding="utf-8", newline="") as f:
+                existing = f.read()
+
         if existing != rendered:
-            target.write_text(rendered, encoding="utf-8")
+            with open(target, "w", encoding="utf-8", newline="") as f:
+                f.write(rendered)
             changed.append(str(target))
+
+    # Report orphaned indexes
+    for orphan in orphans:
+        print("openwiki-finalize: orphaned index (no pages remain): %s" % orphan)
+
     return changed
 
 
