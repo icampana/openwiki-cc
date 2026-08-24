@@ -14,6 +14,8 @@ natively for each host:
 - **Codex** — a skill: `.agents/skills/openwiki/SKILL.md` → `$openwiki`.
 - **opencode** — the *same* skill file, which opencode also discovers, plus a thin
   `.opencode/commands/wiki.md` that adds `init`/`update` slash arguments → `/wiki`.
+- **anything else** — the same skill via [skills](https://github.com/vercel-labs/skills):
+  `npx skills add icampana/openwiki-cc`.
 
 The system prompt and the exact git commands are reproduced **verbatim from OpenWiki's real
 source**, not from memory.
@@ -24,6 +26,34 @@ Point it at a repository and it writes human- and agent-friendly Markdown docume
 `openwiki/`, with `quickstart.md` as the entrypoint and thematic section pages (architecture,
 workflows, operations, …). It grounds every claim in source files, existing docs, and git
 history — and on later runs it updates only what actually changed.
+
+## Install — any agent, one command
+
+This repo doubles as a [skills](https://github.com/vercel-labs/skills) source: the CLI discovers
+`.agents/skills/openwiki/SKILL.md` on its own and can install it into **opencode**, **Claude Code**,
+**Codex**, **Cursor**, and 70+ more agents:
+
+```bash
+npx skills add icampana/openwiki-cc                          # interactive: pick agents + scope
+
+# scripted examples
+npx skills add icampana/openwiki-cc -g -a opencode           # global, opencode only
+npx skills add icampana/openwiki-cc -g -a opencode claude-code codex   # several at once
+```
+
+The skill always materializes under `.agents/skills/` — project scope or global
+(`~/.agents/skills/`) — and other agents are symlinked to that one copy. Restart hosts afterward.
+Later: `npx skills update openwiki` pulls new versions; `npx skills list` shows what is installed
+where.
+
+**The install is complete out of the box.** The deterministic Step 3b finalizer
+(`openwiki-finalize.py` — OKF front matter backfill, index generation, broken-link repair) ships
+inside the skill folder, so every install path gets full behavior with no extra steps. Installed
+before the script shipped? `npx skills update openwiki` refreshes your copy.
+
+Invocation is unchanged from the host sections below: `$openwiki`, or ask for "init / update the
+openwiki docs". On opencode you can additionally install the `/wiki` command for real slash
+arguments.
 
 ## Install — Claude Code
 
@@ -42,6 +72,10 @@ pulls new versions.
 > Plugin commands are always namespaced `plugin:command`, so the command is `/openwiki:wiki`
 > (never a bare `/openwiki`). Install manually instead if you want a bare `/wiki`.
 
+> Pick **one** install path. The marketplace plugin and `npx skills add` both work on Claude Code,
+> but together they expose the same prompt twice — `/openwiki:wiki` and an `openwiki` skill — and
+> the two can be at different versions.
+
 ### Manual (no marketplace)
 
 Copy the single command file into the repo you want to document, or globally. Under
@@ -54,6 +88,14 @@ cp commands/wiki.md your-repo/.claude/commands/
 
 # or global → /wiki everywhere
 cp commands/wiki.md ~/.claude/commands/
+```
+
+The command looks for the Step 3b finalizer next to a known install root, so copy it too —
+otherwise the run completes but skips front matter, indexes, and link checks:
+
+```bash
+mkdir -p ~/.claude/skills/openwiki/scripts
+cp scripts/openwiki-finalize.py ~/.claude/skills/openwiki/scripts/
 ```
 
 ## Install — Codex and opencode

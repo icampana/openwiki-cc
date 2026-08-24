@@ -733,5 +733,42 @@ class TestIdempotence(TempWiki):
         self.assertEqual(self.snapshot(), after_one, "second run must be byte-identical")
 
 
+class TestPunctuatedAnchors(TempWiki):
+    def test_anchor_across_dropped_punctuation_is_not_annotated(self):
+        """A heading with punctuation between words yields a doubled hyphen.
+
+        GitHub drops the punctuation but hyphenates both surrounding spaces,
+        so "## Install - any agent" is reachable as "#install--any-agent".
+        Collapsing the run produced a false positive that annotated correct
+        links in this repository's own docs.
+        """
+        self.write("b.md", "# B\n\n## Install \u2014 any agent, one command\n\nBody.\n")
+        both = self.write("both.md", "# Both\n\n[x](b.md#install--any-agent-one-command)\n")
+        collapsed = self.write("collapsed.md", "# C\n\n[x](b.md#install-any-agent-one-command)\n")
+        finalize.pass_links(self.wiki)
+        self.assertNotIn(MARKER, both.read_text(encoding="utf-8"))
+        self.assertNotIn(MARKER, collapsed.read_text(encoding="utf-8"))
+
+    def test_a_genuinely_missing_anchor_is_still_annotated(self):
+        self.write("b.md", "# B\n\n## Install \u2014 any agent\n\nBody.\n")
+        bad = self.write("bad.md", "# Bad\n\n[x](b.md#install--nope)\n")
+        finalize.pass_links(self.wiki)
+        self.assertIn(MARKER, bad.read_text(encoding="utf-8"))
+
+
+class TestShippedCopy(unittest.TestCase):
+    def test_skill_ships_an_identical_finalizer(self):
+        """The skill folder carries its own copy for installed-skill runs.
+
+        Editing scripts/openwiki-finalize.py without refreshing the twin would
+        make installed skills silently run stale finalize logic.
+        """
+        repo = pathlib.Path(__file__).parent.parent
+        canonical = repo / "scripts" / "openwiki-finalize.py"
+        shipped = repo / ".agents" / "skills" / "openwiki" / "scripts" / "openwiki-finalize.py"
+        self.assertTrue(shipped.exists(), "missing shipped copy: %s" % shipped)
+        self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
