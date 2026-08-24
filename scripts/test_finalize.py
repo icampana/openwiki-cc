@@ -28,7 +28,7 @@ class TempWiki(unittest.TestCase):
     def write(self, rel, text):
         p = self.wiki / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text, encoding="utf-8")
+        p.write_text(text, encoding="utf-8", newline="")
         return p
 
 
@@ -79,6 +79,36 @@ class TestFrontmatter(TempWiki):
         finalize.pass_frontmatter(self.wiki)
         self.assertNotIn("type:", i.read_text(encoding="utf-8"))
         self.assertNotIn("type:", l.read_text(encoding="utf-8"))
+
+    def test_crlf_frontmatter_is_byte_identical(self):
+        """A valid CRLF file should not be modified."""
+        original = "---\r\ntype: Playbook\r\ntitle: Kept\r\n---\r\n\r\n# Kept\r\n\r\nBody.\r\n"
+        p = self.write("kept_crlf.md", original)
+        finalize.pass_frontmatter(self.wiki)
+        self.assertEqual(p.read_text(encoding="utf-8", newline=""), original)
+
+    def test_crlf_file_without_type_gains_type_preserving_crlf(self):
+        """A CRLF file missing type should gain it without normalizing line endings."""
+        original = "---\r\ntitle: Existing\r\nowner: me\r\n---\r\n\r\n# H\r\n\r\nB.\r\n"
+        p = self.write("notype_crlf.md", original)
+        finalize.pass_frontmatter(self.wiki)
+        out = p.read_text(encoding="utf-8", newline="")
+        # Should still use CRLF
+        self.assertIn("\r\n", out)
+        # Parse and verify fields
+        parsed = finalize.parse_fields(finalize.split_frontmatter(out)[0])
+        self.assertEqual(parsed["type"], "Reference")
+        self.assertEqual(parsed["title"], "Existing")
+        self.assertEqual(parsed["owner"], "me")
+
+    def test_lf_behavior_unchanged(self):
+        """Verify LF files still work as before."""
+        p = self.write("lf_test.md", "# Title\n\nDescription.\n")
+        finalize.pass_frontmatter(self.wiki)
+        out = p.read_text(encoding="utf-8")
+        # Should be LF, not CRLF
+        self.assertNotIn("\r\n", out)
+        self.assertTrue(out.startswith("---\n"))
 
 
 if __name__ == "__main__":

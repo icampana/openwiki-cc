@@ -27,14 +27,27 @@ def split_frontmatter(text):
     """Split leading YAML front matter. Returns (fields_text, body).
 
     fields_text is None when there is no well-formed block, in which case body
-    is the untouched input.
+    is the untouched input. Handles both LF and CRLF line endings.
     """
-    if not text.startswith("---\n"):
+    # Detect opening delimiter and line ending style
+    if text.startswith("---\n"):
+        newline = "\n"
+        open_len = 4
+    elif text.startswith("---\r\n"):
+        newline = "\r\n"
+        open_len = 5
+    else:
         return None, text
-    end = text.find("\n---\n", 3)
+
+    # Find closing delimiter using the same line ending
+    closing_start = newline + "---" + newline
+    end = text.find(closing_start, open_len)
     if end == -1:
         return None, text
-    return text[4:end + 1], text[end + 5:]
+
+    # Return fields (from after opening to before closing including newline before ---)
+    # and body (from after closing)
+    return text[open_len:end + len(newline)], text[end + len(closing_start):]
 
 
 def parse_fields(fields_text):
@@ -95,23 +108,37 @@ def ensure_frontmatter(text, fallback_title):
 
     Existing blocks are preserved verbatim; only a missing `type` is injected.
     Rewriting a valid block would violate OKF's round-trip requirement for
-    producer-defined fields.
+    producer-defined fields. Line endings (LF/CRLF) are preserved.
     """
     fields_text, body = split_frontmatter(text)
 
     if fields_text is not None:
         if parse_fields(fields_text).get("type"):
             return text
-        injected = "type: %s\n%s: true\n" % (FALLBACK_TYPE, GENERATED_FIELD)
-        return "---\n" + injected + fields_text + "---\n" + body
+
+        # Determine line ending from fields_text (which includes trailing newline)
+        if fields_text.endswith("\r\n"):
+            newline = "\r\n"
+        else:
+            newline = "\n"
+
+        injected = "type: %s%s%s: true%s" % (FALLBACK_TYPE, newline, GENERATED_FIELD, newline)
+        return "---" + newline + injected + fields_text + "---" + newline + body
 
     title = derive_title(body) or fallback_title
     description = derive_description(body)
+
+    # Determine line ending from body
+    if "\r\n" in body:
+        newline = "\r\n"
+    else:
+        newline = "\n"
+
     lines = ["---", "type: %s" % FALLBACK_TYPE, "title: %s" % _escape(title)]
     if description:
         lines.append("description: %s" % _escape(description))
     lines += ["%s: true" % GENERATED_FIELD, "---", ""]
-    return "\n".join(lines) + "\n" + body.lstrip("\n")
+    return newline.join(lines) + newline + body.lstrip("\r\n")
 
 
 def markdown_files(wiki):
@@ -124,10 +151,10 @@ def pass_frontmatter(wiki):
     for path in markdown_files(wiki):
         if path.name in RESERVED:
             continue
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8", newline="")
         updated = ensure_frontmatter(text, path.stem.replace("-", " ").title())
         if updated != text:
-            path.write_text(updated, encoding="utf-8")
+            path.write_text(updated, encoding="utf-8", newline="")
             changed.append(str(path))
     return changed
 
