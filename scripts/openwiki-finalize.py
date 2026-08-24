@@ -251,8 +251,8 @@ MARKER_PREFIX = "openwiki: broken internal link"
 # parser and risks false positives, which corrupt good content.
 LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)\)")
 # No DOTALL: markers are single-line, and spanning lines could eat real content.
-# Match with optional leading newline to handle markers on their own line (added by split/join).
-MARKER_RE = re.compile(r"(?:\n)?[ \t]*<!--\s*%s[^\n]*?-->" % re.escape(MARKER_PREFIX))
+# Match with leading \n (added by split/join separator) and optional trailing \r if file uses CRLF.
+MARKER_RE = re.compile(r"\n[ \t]*<!--\s*%s[^\n]*?-->\r?" % re.escape(MARKER_PREFIX))
 ATX_RE = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 
 
@@ -311,9 +311,11 @@ def pass_links(wiki):
         found_problem = False
         out_lines = []
         fence_char = None  # Track which fence character (` or ~) opened current fence
+
         # split("\n"), not splitlines(): split is lossless on trailing
         # newlines, so an untouched file round-trips byte-identically.
-        for line in body.split("\n"):
+        body_lines = body.split("\n")
+        for line in body_lines:
             # Track fence state: only match fences at line start (possibly after indent)
             stripped = line.lstrip()
             if stripped.startswith("```") or stripped.startswith("~~~"):
@@ -355,9 +357,11 @@ def pass_links(wiki):
             indent = line[: len(line) - len(line.lstrip())]
             for href, reason in problems:
                 found_problem = True
-                out_lines.append(
-                    "%s<!-- %s: %s - %s -->" % (indent, MARKER_PREFIX, href, reason)
-                )
+                marker = "%s<!-- %s: %s - %s -->" % (indent, MARKER_PREFIX, href, reason)
+                # Match the line ending of the preceding line (which was just appended)
+                if out_lines and out_lines[-1].endswith("\r"):
+                    marker += "\r"
+                out_lines.append(marker)
 
         # A file with nothing to say is left completely alone. Normalizing it
         # would count as a change and break the no-op contract.

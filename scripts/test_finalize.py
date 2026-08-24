@@ -362,6 +362,57 @@ class TestLinks(TempWiki):
             second = f.read()
         self.assertEqual(second, after, "Second run must be byte-identical")
 
+    def test_crlf_marker_line_has_uniform_endings(self):
+        """FIX 3 (Round 3): Marker line in CRLF file must have CRLF, not mixed."""
+        original = "# CRLF\r\n\r\n[bad](missing.md)\r\n"
+        p = self.write("a.md", original)
+
+        finalize.pass_links(self.wiki)
+
+        with open(p, encoding="utf-8", newline="") as f:
+            after = f.read()
+
+        # Verify all lines use CRLF (including marker line)
+        lines = after.split("\n")
+        for line in lines[:-1]:  # All but last empty element from split
+            self.assertTrue(
+                line.endswith("\r"),
+                f"Line should end with CRLF but ends with: {repr(line[-3:])}"
+            )
+
+        # Verify marker is present
+        self.assertIn(MARKER, after)
+
+        # Second run must be byte-identical (idempotent)
+        finalize.pass_links(self.wiki)
+        with open(p, encoding="utf-8", newline="") as f:
+            second = f.read()
+        self.assertEqual(second, after, "Second run must be byte-identical")
+
+    def test_crlf_no_trailing_newline_with_broken_link(self):
+        """Interaction test: CRLF file with no trailing newline + broken link."""
+        original = "# CRLF\r\n\r\n[bad](missing.md)"  # No trailing newline
+        p = self.write("a.md", original)
+
+        with open(p, encoding="utf-8", newline="") as f:
+            before = f.read()
+        self.assertEqual(before, original)
+
+        finalize.pass_links(self.wiki)
+
+        with open(p, encoding="utf-8", newline="") as f:
+            after = f.read()
+
+        # Should have marker and maintain CRLF in original lines
+        self.assertIn(MARKER, after)
+        self.assertIn("\r\n", after)
+
+        # Second run must be byte-identical
+        finalize.pass_links(self.wiki)
+        with open(p, encoding="utf-8", newline="") as f:
+            second = f.read()
+        self.assertEqual(second, after, "Second run must be byte-identical")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
