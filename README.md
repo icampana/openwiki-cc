@@ -178,8 +178,9 @@ comparable documentation quality.
 ## Headless / CI (`claude -p`)
 
 To run non-interactively without permission prompts, grant a minimal allowlist in
-`.claude/settings.json` (read-only git + snapshot tooling, writes scoped to `openwiki/`,
-`CLAUDE.md`, `AGENTS.md`). The full snippet is documented inside
+`.claude/settings.json` (read-only git + snapshot tooling, writes scoped to `openwiki/` only —
+`AGENTS.md` / `CLAUDE.md` are deliberately absent from the allowlist, matching the `v0.3.3`
+prompt's own "do not write these" instruction). The full snippet is documented inside
 [`commands/wiki.md`](commands/wiki.md).
 
 ## Auto-run as a hook (keep the wiki fresh)

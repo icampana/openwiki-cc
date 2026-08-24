@@ -530,16 +530,16 @@ allowlist. In `.claude/settings.json`:
       "Bash(rg:*)",
       "Bash(date:*)",
       "Edit(openwiki/**)",
-      "Edit(CLAUDE.md)",
-      "Edit(AGENTS.md)",
-      "Write(openwiki/**)",
-      "Write(CLAUDE.md)",
-      "Write(AGENTS.md)"
+      "Write(openwiki/**)"
     ]
   }
 }
 ```
 
+`AGENTS.md` / `CLAUDE.md` are deliberately absent from this allowlist: the `v0.3.3` prompt above
+already forbids writing them during normal runs, and granting the permission anyway would leave
+enforcement resting solely on the model obeying its own prompt, with no technical backstop. Do
+not add them back.
+
 Read/Glob/Grep over the repo are already read-only; the system prompt forbids reading `.env`
-and secrets. Git commands here are all read-only. Keep Write/Edit scoped to `openwiki/**`,
-`CLAUDE.md`, `AGENTS.md` only.
+and secrets. Git commands here are all read-only. Keep Write/Edit scoped to `openwiki/**` only.

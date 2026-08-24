@@ -529,5 +529,6 @@ codex exec --sandbox workspace-write --ask-for-approval never "run the openwiki 
 ```
 
 The skill only needs: read-only git (`status`/`log`/`diff`/`rev-parse`/`show`/`blame`),
-`find`/`sha256sum`/`rg` for discovery and the snapshot, and writes limited to `openwiki/`,
-`CLAUDE.md`, `AGENTS.md`.
+`find`/`sha256sum`/`rg` for discovery and the snapshot, and writes limited to `openwiki/` —
+`AGENTS.md` / `CLAUDE.md` are deliberately excluded, since the skill above already forbids
+writing them during normal runs.
