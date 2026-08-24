@@ -471,5 +471,68 @@ class TestLinks(TempWiki):
         self.assertEqual(second.count(MARKER), 1)
 
 
+class TestIdempotence(TempWiki):
+    def snapshot(self):
+        result = {}
+        for p in sorted(self.wiki.rglob("*.md")):
+            with open(p, encoding="utf-8", newline="") as f:
+                result[str(p.relative_to(self.wiki))] = f.read()
+        return result
+
+    def run_cli(self):
+        script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
+        return subprocess.run(
+            [sys.executable, str(script), str(self.wiki)],
+            capture_output=True, text=True,
+        )
+
+    def test_two_consecutive_runs_are_byte_identical(self):
+        # A realistic nested wiki: root page, two levels of subdirectory,
+        # a broken link, a working link, a working anchor link, and a
+        # file that already carries valid front matter.
+        self.write("quickstart.md", "# Quickstart\n\nStart. See [arch](arch/overview.md).\n")
+        self.write("arch/overview.md",
+                    "# Overview\n\nSee [gone](nope.md) and [qs](../quickstart.md).\n")
+        self.write("arch/decisions/adr-1.md",
+                    "# ADR 1\n\nSee [overview](../overview.md#overview) "
+                    "and [missing anchor](../overview.md#nope).\n")
+        self.write("kept.md", '---\ntype: Playbook\nowner: me\n---\n\n# Kept\n\nBody.\n')
+        self.write("no-type.md", "---\ntitle: Existing\n---\n\n# No Type\n\nBody.\n")
+        self.write("crlf.md", "# CRLF\r\n\r\n[gone](also-nope.md)\r\n")
+
+        first = self.run_cli()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        after_one = self.snapshot()
+
+        second = self.run_cli()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        after_two = self.snapshot()
+
+        self.assertEqual(after_one, after_two)
+
+    def test_exit_zero_on_missing_directory(self):
+        script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
+        r = subprocess.run(
+            [sys.executable, str(script), str(self.tmp / "does-not-exist")],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(r.returncode, 0)
+
+    def test_exit_zero_on_unreadable_content(self):
+        # A sibling valid file must still get finalized: one unreadable file
+        # must cost at most that one file, not the whole run (main()'s
+        # top-level except-and-exit-0 would otherwise mask a total skip).
+        good = self.write("quickstart.md", "# Quickstart\n\nBody.\n")
+        p = self.write("bad.md", "# Bad\n")
+        p.write_bytes(b"\xff\xfe not utf-8 \xff")
+
+        r = self.run_cli()
+
+        self.assertEqual(r.returncode, 0)
+        with open(good, encoding="utf-8", newline="") as f:
+            out = f.read()
+        self.assertTrue(out.startswith("---\n"), "sibling file must still be finalized: %r" % out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

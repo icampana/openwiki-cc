@@ -142,6 +142,20 @@ def ensure_frontmatter(text, fallback_title):
     return newline.join(lines) + newline + body.lstrip("\r\n")
 
 
+def read_text_or_none(path):
+    """Read a file with newline="" (see module docstring), or return None
+    when it is not decodable text.
+
+    One unreadable file must not cost the whole wiki its finalize pass.
+    """
+    try:
+        with open(path, encoding="utf-8", newline="") as f:
+            return f.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        print("openwiki-finalize: skipping %s (%s)" % (path, exc.__class__.__name__))
+        return None
+
+
 def markdown_files(wiki):
     return sorted(p for p in wiki.rglob("*.md") if p.is_file())
 
@@ -152,10 +166,9 @@ def pass_frontmatter(wiki):
     for path in markdown_files(wiki):
         if path.name in RESERVED:
             continue
-        # Use builtin open() with newline="" for Python 3.9+ compatibility
-        # (pathlib.Path.read_text() didn't support newline= until Python 3.13)
-        with open(path, encoding="utf-8", newline="") as f:
-            text = f.read()
+        text = read_text_or_none(path)
+        if text is None:
+            continue
         updated = ensure_frontmatter(text, path.stem.replace("-", " ").title())
         if updated != text:
             # Use builtin open() with newline="" for Python 3.9+ compatibility
@@ -312,9 +325,9 @@ def pass_links(wiki):
     """Annotate broken relative links and anchors. Returns changed paths."""
     changed = []
     for path in markdown_files(wiki):
-        # Use builtin open() with newline="" to preserve CRLF/LF bytes exactly
-        with open(path, encoding="utf-8", newline="") as f:
-            original = f.read()
+        original = read_text_or_none(path)
+        if original is None:
+            continue
         text = strip_markers(original)
         had_markers = text != original
 
