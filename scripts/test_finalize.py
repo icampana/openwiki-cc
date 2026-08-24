@@ -305,6 +305,63 @@ class TestLinks(TempWiki):
         # All three links should be valid (GitHub-style disambiguation)
         self.assertNotIn(MARKER, out)
 
+    def test_tilde_fenced_code_blocks_are_not_annotated(self):
+        """FIX 1 (Round 2): Links inside ~~~ fenced code blocks should not be annotated."""
+        p = self.write("a.md",
+            "# A\n\n"
+            "Example:\n\n"
+            "~~~markdown\n"
+            "[broken](missing.md)\n"
+            "~~~\n\n"
+            "[valid](b.md)\n"
+        )
+        self.write("b.md", "# B\n\nBody.\n")
+        finalize.pass_links(self.wiki)
+        out = p.read_text(encoding="utf-8")
+        # The broken link inside the ~~~ fence should NOT get a marker
+        lines = out.split("\n")
+        fence_section = "\n".join(lines[3:6])  # The ~~~ ... ~~~ part
+        self.assertNotIn(MARKER, fence_section)
+        self.assertNotIn(MARKER, out)
+
+    def test_tilde_fence_containing_backtick_fence(self):
+        """FIX 1 (Round 2): ~~~ fence is not closed by ``` line."""
+        p = self.write("a.md",
+            "# A\n\n"
+            "~~~\n"
+            "[broken](missing.md)\n"
+            "```\n"
+            "not closed\n"
+            "~~~\n"
+        )
+        finalize.pass_links(self.wiki)
+        out = p.read_text(encoding="utf-8")
+        # Backticks inside ~~~ should not close the fence
+        self.assertNotIn(MARKER, out)
+
+    def test_crlf_file_with_broken_link_preserves_crlf(self):
+        """FIX 2 (Round 2): CRLF file with broken link stays CRLF throughout."""
+        original = "---\r\ntype: Reference\r\ntitle: Test\r\n---\r\n\r\n# A\r\n\r\n[broken](missing.md)\r\n"
+        p = self.write("a.md", original)
+        # Use open() with newline="" to read as-is (preserve CRLF)
+        with open(p, encoding="utf-8", newline="") as f:
+            before = f.read()
+        self.assertEqual(before, original)
+
+        finalize.pass_links(self.wiki)
+
+        # Verify the file still has CRLF and marker is present
+        with open(p, encoding="utf-8", newline="") as f:
+            after = f.read()
+        self.assertIn("\r\n", after, "File should preserve CRLF line endings")
+        self.assertIn(MARKER, after, "File should have marker for broken link")
+
+        # Second run must be byte-identical (idempotent)
+        finalize.pass_links(self.wiki)
+        with open(p, encoding="utf-8", newline="") as f:
+            second = f.read()
+        self.assertEqual(second, after, "Second run must be byte-identical")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

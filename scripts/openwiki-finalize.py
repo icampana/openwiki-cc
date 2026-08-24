@@ -298,7 +298,9 @@ def pass_links(wiki):
     """Annotate broken relative links and anchors. Returns changed paths."""
     changed = []
     for path in markdown_files(wiki):
-        original = path.read_text(encoding="utf-8")
+        # Use builtin open() with newline="" to preserve CRLF/LF bytes exactly
+        with open(path, encoding="utf-8", newline="") as f:
+            original = f.read()
         text = strip_markers(original)
         had_markers = text != original
 
@@ -308,20 +310,27 @@ def pass_links(wiki):
 
         found_problem = False
         out_lines = []
-        in_fence = False
+        fence_char = None  # Track which fence character (` or ~) opened current fence
         # split("\n"), not splitlines(): split is lossless on trailing
         # newlines, so an untouched file round-trips byte-identically.
         for line in body.split("\n"):
-            # Track fence state
-            stripped = line.strip()
-            if stripped.startswith(FENCE):
-                in_fence = not in_fence
+            # Track fence state: only match fences at line start (possibly after indent)
+            stripped = line.lstrip()
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                # Determine which fence character this line has
+                fence_type = "```" if stripped.startswith("```") else "~~~"
+                if fence_char is None:
+                    # Opening a new fence
+                    fence_char = fence_type[0]
+                elif fence_type[0] == fence_char:
+                    # Closing the current fence (must match opening character)
+                    fence_char = None
 
             out_lines.append(line)
             problems = []
 
             # Only process links outside of fenced code blocks
-            if not in_fence:
+            if fence_char is None:
                 for match in LINK_RE.finditer(line):
                     href = match.group("href")
                     if not _is_internal(href):
@@ -335,7 +344,8 @@ def pass_links(wiki):
                         continue
                     if anchor and target.suffix == ".md":
                         try:
-                            target_text = target.read_text(encoding="utf-8")
+                            with open(target, encoding="utf-8", newline="") as f:
+                                target_text = f.read()
                         except (OSError, UnicodeDecodeError):
                             problems.append((href, "heading anchor not found"))
                             continue
@@ -367,7 +377,9 @@ def pass_links(wiki):
             updated = updated_body
 
         if updated != original:
-            path.write_text(updated, encoding="utf-8")
+            # Use builtin open() with newline="" to preserve CRLF/LF bytes
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(updated)
             changed.append(str(path))
     return changed
 
