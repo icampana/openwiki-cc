@@ -86,7 +86,7 @@ inspection, and existing docs to infer what changed (as the system prompt alread
 Keep the assembled output (labelled `$ git status --short`, etc.) as the **Git context** /
 **Git change summary** block referenced by the user prompt below.
 
-Then check for an ignore file, which changes two prompt instructions and the git posture:
+Then check for an ignore file, which changes three prompt instructions and the git posture:
 
 ```bash
 test -f .openwikiignore && echo active || echo absent
@@ -95,9 +95,21 @@ test -f .openwikiignore && echo active || echo absent
 - **absent** → use these variants in the Step 3 prompt:
   - `{GIT_HISTORY_HINT}` → `Read git history when it helps establish repository context or explain why code exists. `
   - `{DISCOVERY_INSTRUCTION}` → `- Do not call glob with **/* from the root. Use targeted discovery by directory and extension. Prefer shell commands like rg --files with excludes for .git, node_modules, dist, build, cache directories, and existing generated wiki output.`
+  - `{OPENWIKIIGNORE_INSTRUCTIONS}` → empty (upstream `formatOpenWikiIgnoreInstructions` returns just a newline when there is no ignore file).
 - **active** → read it, treat every pattern as off-limits for reading, and use:
   - `{GIT_HISTORY_HINT}` → `Git history is unavailable while .openwikiignore is active; rely on allowed source files and tests without bypassing the restriction. `
   - `{DISCOVERY_INSTRUCTION}` → `- Do not call glob with **/* from the root. Use targeted ls, glob, and grep by directory and extension, skipping .git, node_modules, dist, build, cache directories, and existing generated wiki output.`
+  - `{OPENWIKIIGNORE_INSTRUCTIONS}` → from upstream `formatOpenWikiIgnoreInstructions`, with the active patterns listed one per line, each indented two spaces and JSON-quoted:
+    ```
+    .openwikiignore discipline:
+    - This repository has .openwikiignore rules. Treat matching paths as out of scope.
+    - Filesystem tools enforce these rules; if a tool reports an excluded path, do not retry through shell execute.
+    - For repository discovery use ls, read_file, glob, and grep; these keep exclusions enforced. Shell execute is limited to a few maintenance commands while .openwikiignore is active, so do not use it to read files or reconstruct git history.
+    - Do not document excluded paths or infer details about their contents.
+    - Active patterns:
+      "<pattern>"
+      "<pattern>"
+    ```
 
 `{OUTPUT_LANGUAGE_INSTRUCTIONS}` is always empty: this port has no `--language` flag.
 
@@ -143,9 +155,9 @@ Init workflow:
   a) For each file in your skeleton, include a description of what you plan to document in said file.
   b) Ensure EVERY substantial service, API endpoints, and major workflow is included in this structure. Remember: agents will use this wiki to understand the codebase, navigate efficiently, and learn concepts, so the wiki must contain all of this in an easily discoverable and navigable way.
   c) If an agent or human can't solely use the wiki to gather a complete understanding of the repository, its systems, and workflows, the documentation is insufficient.
-5. Once you've finished deeply researching every part of the repository, and creating the wiki skeleton, invoke the 'skeleton_critic' subagent to review your skeleton.
+5. **[adapted]** Once you've finished deeply researching every part of the repository, and creating the wiki skeleton, use the Task tool to launch a general-purpose, read-only subagent with this brief: act as a skeleton critic — review the wiki skeleton in /openwiki/_skeleton.md against the repository inventory and return a request ledger (RQ items) of gaps, miscoverage, or structural problems, without editing any files.
   a) Create one TODO for every returned RQ item and resolve every requested change before continuing.
-  b) Re-invoke 'skeleton_critic' exactly once with the complete prior-request ledger and what you did to resolve each item. This is the final critic review. If an item remains UNRESOLVED or a revision introduced a new regression, address that exact item directly and keep its TODO open until resolved; do not invoke the critic a third time.
+  b) **[adapted]** Launch the same kind of read-only skeleton-critic subagent exactly once more, with the complete prior-request ledger and what you did to resolve each item. This is the final critic review. If an item remains UNRESOLVED or a revision introduced a new regression, address that exact item directly and keep its TODO open until resolved; do not launch a third skeleton-critic subagent.
 6. After completing the wiki skeleton and resolving every critic TODO, fill the contents for every page in the skeleton. A passing mention, directory list, source-map row, or concise overview is not substantive coverage: explain responsibilities, owning entrypoints and symbols, important relationships and invariants, focused tests, and primary evidence when they exist.
   a) REMEMBER: An agent or human should be able to use the wiki to fully understand the codebase and its systems/workflows without needing to read a single line of code outside of the wiki.
 7. After writing the wiki and its contents, perform an unknown-unknown pass over uncovered manifest-backed or high-ranked clusters, uncited one-hop dependencies, and cross-system workflows revealed during writing. Expand the plan and wiki when this exposes a real gap.
@@ -153,12 +165,12 @@ Init workflow:
 - Optimize for path compression: shorten the route from an engineering intent to the owning files and symbols, related systems, focused tests, and narrow validation command.
 - Substantial components and major workflows must be documented during init. Defer only when explicitly outside scope, unavailable to inspect safely, or evidence-blocked. Never defer an area merely because of time, token, page-count, or navigation convenience. Record valid deferrals in a concise Backlog section in quickstart with a source anchor and reason.
 - Do not document every file or target a page count. Wiki depth should reflect meaningful repository complexity.
-- Verify the completed wiki using the 'wiki_question_finder' and 'wiki_answer_verifier' subagents:
-  1. Invoke 'wiki_question_finder'.
+- **[adapted]** Verify the completed wiki using general-purpose, read-only Task-tool subagents in two roles — a question-finder subagent and one or more answer-verifier subagents:
+  1. Launch a question-finder subagent: read-only, brief it to inspect the finished wiki and repository evidence and return a list of verification questions (ID, text, acceptance criteria) that a reader should be able to answer from the wiki alone.
   2. Create one TODO for every returned question ID.
-  3. Before every verification wave, including retries, create the complete batch plan. Group questions that share relevant wiki pages, systems, or evidence into batches of 2–3. A question may run alone only when no other question in that wave has meaningful overlap; do not use one verifier per question by default. Launch all batches for the wave together in one parallel tool-call message. On the initial wave, provide each question's exact ID, text, and acceptance criteria.
-  4. For every PARTIAL or FAIL result, update the canonical wiki pages using the reported missing details. Complete all documentation repairs for the wave before beginning its retry verification; do not launch verifier calls incrementally as individual questions are repaired.
-  5. Re-invoke 'wiki_answer_verifier' only for PARTIAL or FAIL IDs. For each retry provide only the unchanged question ID and text, its prior missing-items list, and the wiki pages changed to resolve it; do not resend acceptance criteria or source evidence. Mark its TODO complete only after PASS. Repeat only for IDs that still do not pass.
+  3. Before every verification wave, including retries, create the complete batch plan. Group questions that share relevant wiki pages, systems, or evidence into batches of 2–3. A question may run alone only when no other question in that wave has meaningful overlap; do not use one verifier subagent per question by default. Launch all batches for the wave together in one parallel tool-call message, each as a read-only answer-verifier subagent. On the initial wave, give each subagent its questions' exact ID, text, and acceptance criteria.
+  4. For every PARTIAL or FAIL result, update the canonical wiki pages using the reported missing details. Complete all documentation repairs for the wave before beginning its retry verification; do not launch verifier subagent calls incrementally as individual questions are repaired.
+  5. Re-launch answer-verifier subagents only for PARTIAL or FAIL IDs. For each retry provide only the unchanged question ID and text, its prior missing-items list, and the wiki pages changed to resolve it; do not resend acceptance criteria or source evidence. Mark its TODO complete only after PASS. Repeat only for IDs that still do not pass.
 9. Finally, once all the wiki pages are complete, write the /openwiki/quickstart.md file. This should be a high level introduction to the repository wiki, documenting the main sections, concepts and APIs, and providing a quick reference for how to navigate the wiki.
 
 Remember to delete the /openwiki/_skeleton.md file once all wiki files have been created and populated.
@@ -214,7 +226,7 @@ timestamp: <optional ISO 8601 datetime>
 
 Diagrams:
 - Add grounded Mermaid diagrams for significant runtime flows, call sequences, lifecycles/state machines, and data models. Use sequenceDiagram, stateDiagram-v2, erDiagram, or flowchart as appropriate.
-- Every participant, state, entity, and relationship must be supported by inspected source. Consult the mermaid-diagrams skill for valid syntax.
+- Every participant, state, entity, and relationship must be supported by inspected source. **[adapted]** Consult a mermaid-diagrams skill for valid syntax if the host provides one; otherwise use valid Mermaid syntax directly without depending on the skill's availability.
 - Prefer a few substantive diagrams over decorative diagrams; skip navigation and simple reference pages.
 
 IMPORTANT REMINDER:
@@ -390,7 +402,7 @@ Diagram discipline:
 - Where a runtime flow, lifecycle, data model, or non-trivial control flow is clearer as a picture than as prose, embed a Mermaid diagram in a fenced ```mermaid block on the most relevant page. Use sequenceDiagram for request/runtime flows, stateDiagram-v2 for lifecycles, erDiagram for the data model, and flowchart for branching control flow.
 - Ground every diagram in inspected source. Do not invent participants, states, entities, or relationships the code does not support.
 - Keep diagrams accurate on update runs. A stale diagram is a stale claim, not existing structure to preserve: fix it in the same edit as the surrounding prose.
-- Add a diagram wherever a page documents a request or runtime flow, a call sequence, a lifecycle or state machine, or a data model. These are the high-value cases, and a typical repository wiki has several of them, not one overall. Skip pages that are navigation, reference tables, or configuration. Prefer a few strong diagrams over decorating every page, give each a one-line caption, and consult the mermaid-diagrams skill for label-safety rules.
+- Add a diagram wherever a page documents a request or runtime flow, a call sequence, a lifecycle or state machine, or a data model. These are the high-value cases, and a typical repository wiki has several of them, not one overall. Skip pages that are navigation, reference tables, or configuration. Prefer a few strong diagrams over decorating every page, give each a one-line caption. **[adapted]** Consult a mermaid-diagrams skill for label-safety rules if the host provides one; otherwise apply Mermaid label-safety rules directly (quote labels with special characters, avoid unescaped parentheses/pipes in node text) without depending on the skill's availability.
 - OpenWiki validates every mermaid fence after the run and converts any that fail to parse into a plain ```text fence, so a broken diagram never breaks rendering. If you find a text fence preceded by an HTML comment starting with "openwiki: mermaid parse failed", repair the syntax using the parser error in the comment, restore the ```mermaid fence, and delete the comment.
 
 
