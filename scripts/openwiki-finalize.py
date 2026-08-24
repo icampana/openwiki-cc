@@ -151,10 +151,15 @@ def pass_frontmatter(wiki):
     for path in markdown_files(wiki):
         if path.name in RESERVED:
             continue
-        text = path.read_text(encoding="utf-8", newline="")
+        # Use builtin open() with newline="" for Python 3.9+ compatibility
+        # (pathlib.Path.read_text() didn't support newline= until Python 3.13)
+        with open(path, encoding="utf-8", newline="") as f:
+            text = f.read()
         updated = ensure_frontmatter(text, path.stem.replace("-", " ").title())
         if updated != text:
-            path.write_text(updated, encoding="utf-8", newline="")
+            # Use builtin open() with newline="" for Python 3.9+ compatibility
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(updated)
             changed.append(str(path))
     return changed
 

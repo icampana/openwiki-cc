@@ -28,7 +28,9 @@ class TempWiki(unittest.TestCase):
     def write(self, rel, text):
         p = self.wiki / rel
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(text, encoding="utf-8", newline="")
+        # Use builtin open() with newline="" for Python 3.9+ compatibility
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
         return p
 
 
@@ -85,14 +87,19 @@ class TestFrontmatter(TempWiki):
         original = "---\r\ntype: Playbook\r\ntitle: Kept\r\n---\r\n\r\n# Kept\r\n\r\nBody.\r\n"
         p = self.write("kept_crlf.md", original)
         finalize.pass_frontmatter(self.wiki)
-        self.assertEqual(p.read_text(encoding="utf-8", newline=""), original)
+        # Use builtin open() with newline="" for Python 3.9+ compatibility
+        with open(p, encoding="utf-8", newline="") as f:
+            result = f.read()
+        self.assertEqual(result, original)
 
     def test_crlf_file_without_type_gains_type_preserving_crlf(self):
         """A CRLF file missing type should gain it without normalizing line endings."""
         original = "---\r\ntitle: Existing\r\nowner: me\r\n---\r\n\r\n# H\r\n\r\nB.\r\n"
         p = self.write("notype_crlf.md", original)
         finalize.pass_frontmatter(self.wiki)
-        out = p.read_text(encoding="utf-8", newline="")
+        # Use builtin open() with newline="" for Python 3.9+ compatibility
+        with open(p, encoding="utf-8", newline="") as f:
+            out = f.read()
         # Should still use CRLF
         self.assertIn("\r\n", out)
         # Parse and verify fields
