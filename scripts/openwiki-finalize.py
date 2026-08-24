@@ -16,6 +16,7 @@ Two rules govern everything below:
 """
 import argparse
 import pathlib
+import re
 import sys
 
 RESERVED = {"index.md", "log.md"}
@@ -244,6 +245,86 @@ def pass_indexes(wiki):
     return changed
 
 
+MARKER_PREFIX = "openwiki: broken internal link"
+LINK_RE = re.compile(r"\[(?P<text>[^\]]*)\]\((?P<href>[^)\s]+)\)")
+# No DOTALL: markers are single-line, and spanning lines could eat real content.
+MARKER_RE = re.compile(r"[ \t]*<!--\s*%s[^\n]*?-->\n?" % re.escape(MARKER_PREFIX))
+ATX_RE = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
+
+
+def slugify(heading):
+    """GitHub-style anchor slug."""
+    text = heading.strip().lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    return re.sub(r"[\s]+", "-", text).strip("-")
+
+
+def headings(text):
+    _, body = split_frontmatter(text)
+    return {slugify(m.group(2)) for m in ATX_RE.finditer(body)}
+
+
+def strip_markers(text):
+    """Remove previously written markers so re-running cannot stack them."""
+    return MARKER_RE.sub("", text)
+
+
+def _is_internal(href):
+    if href.startswith(("http://", "https://", "mailto:", "//", "#", "/")):
+        return False
+    return True
+
+
+def pass_links(wiki):
+    """Annotate broken relative links and anchors. Returns changed paths."""
+    changed = []
+    for path in markdown_files(wiki):
+        original = path.read_text(encoding="utf-8")
+        text = strip_markers(original)
+        had_markers = text != original
+        found_problem = False
+        out_lines = []
+        # split("\n"), not splitlines(): split is lossless on trailing
+        # newlines, so an untouched file round-trips byte-identically.
+        for line in text.split("\n"):
+            out_lines.append(line)
+            problems = []
+            for match in LINK_RE.finditer(line):
+                href = match.group("href")
+                if not _is_internal(href):
+                    continue
+                target_part, _, anchor = href.partition("#")
+                if not target_part:
+                    continue
+                target = (path.parent / target_part).resolve()
+                if not target.exists():
+                    problems.append((href, "target not found"))
+                    continue
+                if anchor and target.suffix == ".md":
+                    try:
+                        target_text = target.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        problems.append((href, "heading anchor not found"))
+                        continue
+                    if slugify(anchor) not in headings(target_text):
+                        problems.append((href, "heading anchor not found"))
+            indent = line[: len(line) - len(line.lstrip())]
+            for href, reason in problems:
+                found_problem = True
+                out_lines.append(
+                    "%s<!-- %s: %s - %s -->" % (indent, MARKER_PREFIX, href, reason)
+                )
+        # A file with nothing to say is left completely alone. Normalizing it
+        # would count as a change and break the no-op contract.
+        if not found_problem and not had_markers:
+            continue
+        updated = "\n".join(out_lines)
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            changed.append(str(path))
+    return changed
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("wiki", nargs="?", default="openwiki")
@@ -256,8 +337,10 @@ def main():
 
     fm = pass_frontmatter(wiki)
     idx = pass_indexes(wiki)
-    print("openwiki-finalize: front matter %d, indexes %d" % (len(fm), len(idx)))
-    for path in fm + idx:
+    lnk = pass_links(wiki)
+    print("openwiki-finalize: front matter %d, indexes %d, links %d"
+          % (len(fm), len(idx), len(lnk)))
+    for path in fm + idx + lnk:
         print("  + %s" % path)
     return 0
 

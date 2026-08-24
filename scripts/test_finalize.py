@@ -178,5 +178,59 @@ class TestIndexes(TempWiki):
         self.assertTrue((self.wiki / "arch" / "index.md").exists())
 
 
+MARKER = "openwiki: broken internal link"
+
+
+class TestLinks(TempWiki):
+    def test_broken_link_is_annotated_and_kept(self):
+        p = self.write("a.md", "# A\n\nSee [gone](missing.md).\n")
+        finalize.pass_links(self.wiki)
+        out = p.read_text(encoding="utf-8")
+        self.assertIn("[gone](missing.md)", out)   # link preserved
+        self.assertIn(MARKER, out)
+        self.assertIn("missing.md", out.split(MARKER)[1])
+
+    def test_valid_link_is_not_annotated(self):
+        self.write("b.md", "# B\n\nBody.\n")
+        p = self.write("a.md", "# A\n\nSee [b](b.md).\n")
+        finalize.pass_links(self.wiki)
+        self.assertNotIn(MARKER, p.read_text(encoding="utf-8"))
+
+    def test_valid_anchor_passes_and_missing_anchor_fails(self):
+        self.write("b.md", "# B\n\n## Real Section\n\nBody.\n")
+        ok = self.write("ok.md", "# OK\n\n[x](b.md#real-section)\n")
+        bad = self.write("bad.md", "# Bad\n\n[x](b.md#nope)\n")
+        finalize.pass_links(self.wiki)
+        self.assertNotIn(MARKER, ok.read_text(encoding="utf-8"))
+        self.assertIn(MARKER, bad.read_text(encoding="utf-8"))
+
+    def test_external_and_absolute_links_are_ignored(self):
+        p = self.write("a.md", "# A\n\n[x](https://example.com) [y](/abs/path)\n")
+        finalize.pass_links(self.wiki)
+        self.assertNotIn(MARKER, p.read_text(encoding="utf-8"))
+
+    def test_link_outside_wiki_that_exists_is_valid(self):
+        (self.tmp / "README.md").write_text("# Readme\n", encoding="utf-8")
+        p = self.write("a.md", "# A\n\n[readme](../README.md)\n")
+        finalize.pass_links(self.wiki)
+        self.assertNotIn(MARKER, p.read_text(encoding="utf-8"))
+
+    def test_second_run_does_not_duplicate_marker(self):
+        p = self.write("a.md", "# A\n\n[gone](missing.md)\n")
+        finalize.pass_links(self.wiki)
+        first = p.read_text(encoding="utf-8")
+        finalize.pass_links(self.wiki)
+        self.assertEqual(p.read_text(encoding="utf-8"), first)
+        self.assertEqual(first.count(MARKER), 1)
+
+    def test_marker_disappears_once_target_exists(self):
+        p = self.write("a.md", "# A\n\n[b](b.md)\n")
+        finalize.pass_links(self.wiki)
+        self.assertIn(MARKER, p.read_text(encoding="utf-8"))
+        self.write("b.md", "# B\n\nBody.\n")
+        finalize.pass_links(self.wiki)
+        self.assertNotIn(MARKER, p.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
