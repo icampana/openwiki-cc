@@ -1,3 +1,10 @@
+---
+type: Entrypoint
+title: openwiki-cc — quickstart
+description: Entry point to the openwiki-cc wiki — a native Claude Code, Codex, and opencode port of langchain-ai/openwiki that generates and maintains an openwiki/ documentation wiki for a target repository.
+tags: [openwiki-cc, agent-port]
+---
+
 # openwiki-cc — quickstart
 
 **openwiki-cc** is a native **Claude Code**, **OpenAI Codex**, and **opencode** port of
@@ -24,17 +31,22 @@ deliverable is the agent definition itself, expressed as prompt files.
 | [`hooks/test_gate.sh`](../hooks/test_gate.sh) | Self-check for the gate's skip/run decisions. |
 | [`upstream.lock.json`](../upstream.lock.json) | The upstream ref this port was ported from, plus a SHA-256 per reproduced file. |
 | [`scripts/check-upstream-drift.sh`](../scripts/check-upstream-drift.sh) | Re-hashes those files against the latest upstream release. |
+| [`scripts/extract-upstream-prompt.py`](../scripts/extract-upstream-prompt.py) | Pulls the `init`/`update` system prompt text straight out of upstream's `src/agent/prompts/code.ts` for reproduction in `commands/wiki.md` / `SKILL.md`, so the prompt is never hand-retyped. |
+| [`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) | Step 3b of a run: deterministically backfills OKF front matter, regenerates directory `index.md` files, and annotates broken internal links. Idempotent and never deletes content; tested by `scripts/test_finalize.py`. |
 | [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | Runs that check weekly and keeps one issue in sync with the report. |
 | [`README.md`](../README.md) | Human-facing install + usage guide. |
 
 The single source of truth for the agent's behavior is `commands/wiki.md`; the Codex `SKILL.md`
 tracks it with host-specific adaptations. When they disagree, `commands/wiki.md` is authoritative.
 
-> **This port reproduces upstream `0.0.4`; upstream is at `v0.3.3`.** Every file it reproduces has
-> changed since — most consequentially, the prompt bodies moved out to `src/agent/prompts/code.ts`.
-> Treat the port as an implementation of `0.0.4`, not of current upstream. See
-> [Detecting drift](architecture.md#detecting-upstream-drift) for how that gap is tracked and
-> [Fidelity to upstream](../README.md#fidelity-to-upstream) for the per-file detail.
+> **This port is tracked against upstream `v0.3.3`, repository output mode.** The `init`/`update`
+> system prompts are extracted programmatically from `src/agent/prompts/code.ts` with
+> [`scripts/extract-upstream-prompt.py`](../scripts/extract-upstream-prompt.py) rather than
+> retyped, so transcription drift is not possible. See
+> [Detecting drift](architecture.md#detecting-upstream-drift) for how future upstream moves are
+> tracked and [Fidelity to upstream](../README.md#fidelity-to-upstream) for the per-file detail,
+> including what upstream ships that this port deliberately does not (personal output mode, the
+> chat prompt, `--language`) and what remains outstanding (the critic/verifier subagent prompts).
 
 ## Install & run
 

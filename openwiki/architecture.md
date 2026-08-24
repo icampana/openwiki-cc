@@ -1,3 +1,10 @@
+---
+type: Architecture Overview
+title: Architecture — how a run executes
+description: The execution contract behind an openwiki-cc run — mode routing, the git-evidence/snapshot/system-prompt/finalize/metadata lifecycle, idempotence, root-agent-file behavior, and upstream drift detection.
+tags: [openwiki-cc, agent-port]
+---
+
 # Architecture — how a run executes
 
 openwiki-cc has no runtime of its own. Its "architecture" is the **execution contract** encoded
@@ -67,20 +74,38 @@ block fed to the system prompt.
 find openwiki -type f -not -name .last-update.json -print0 | sort -z | xargs -0 sha256sum | sha256sum
 ```
 
-**Step 3 — act as the agent.** The model runs OpenWiki's system prompt against the evidence:
-inventory the repo (tree, config, entrypoints, representative files per domain — never
-`glob **/*` from root, never read every file), write a temporary `openwiki/_plan.md`, then write
-`quickstart.md` + section pages. Discipline baked into the prompt: ≤ 8 pages on init (1–2 for a
-small repo), no stub pages, no single-file directories unless the boundary is real, each concept
-gets one canonical home. Update mode is surgical — a soft diff budget (< ~5 files changed →
-≤ 1–2 pages edited), no formatting-only churn, and no-op allowed. `_plan.md` is deleted before the
-run ends.
+**Step 3 — act as the agent.** The model runs OpenWiki's `v0.3.3` repository-output-mode system
+prompt (reproduced verbatim by [`scripts/extract-upstream-prompt.py`](../scripts/extract-upstream-prompt.py),
+not retyped) against the evidence: inventory the repo (tree, config, entrypoints, representative
+files per domain — never `glob **/*` from root, never read every file), write a temporary
+`openwiki/_plan.md`, then write `quickstart.md` + section pages. Discipline baked into the prompt:
+no stub pages, no single-file directories unless the boundary is real, each concept gets one
+canonical home. Every generated page carries OKF v0.1 YAML front matter (`type` required); `index.md`
+and `log.md` are reserved and never get concept front matter. Update mode is surgical — edit only
+what changed evidence affects, no formatting-only churn, and no-op allowed. `_plan.md` is deleted
+before the run ends.
 
-**Step 4 — persist metadata.** Recompute the Step 2 hash. If **unchanged** → no-op, do not write
-metadata, report the wiki is already current. If **changed** → write `openwiki/.last-update.json`:
+**Step 3b — finalize (deterministic, no model involved).** Runs
+[`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) — three passes reproducing
+upstream `src/okf/frontmatter.ts`, `src/okf/index-sync.ts`, and `src/agent/wiki-link-validator.ts`:
+backfill OKF front matter on any page missing it (tagging inferred fields
+`openwiki_generated: true` for a later run to upgrade with real content), regenerate every
+directory `index.md` deterministically, and annotate broken internal links with an HTML comment
+rather than deleting anything. It always exits 0. This step **must** run before Step 4: its writes
+have to land inside the Step 2/Step 4 snapshot window, or the hash comparison never sees them and
+a genuinely no-op documentation run would still leave stale front matter or dangling links
+unrepaired. It is idempotent by contract — rerunning it against output it already produced makes
+zero changes — otherwise a no-op `update` would still rewrite `.last-update.json` and defeat the
+gate described below.
+
+**Step 4 — persist metadata.** Recompute the Step 2 hash (after Step 3b has run). If
+**unchanged** → no-op, do not write metadata, report the wiki is already current. If **changed** →
+write `openwiki/.last-update.json`:
 ```json
-{ "updatedAt": "<ISO 8601>", "command": "init|update", "gitHead": "<git rev-parse HEAD>", "model": "<model id>" }
+{ "updatedAt": "<ISO 8601>", "command": "init|update", "gitHead": "<git rev-parse HEAD>", "model": "<model id>", "status": "complete|interrupted" }
 ```
+`status` is written `"complete"` on a normal finish; on an interrupted run, the previous metadata
+is left untouched instead so the next update still diffs from the last known-good state.
 
 ## Idempotence & state
 
@@ -94,11 +119,15 @@ Two independent mechanisms keep re-runs cheap and honest:
 
 ## Root agent-file wiring
 
-Unless told otherwise, a run ensures the repo's **top-level** `/AGENTS.md` and/or `/CLAUDE.md`
-carries a short `## OpenWiki` reference section pointing at `openwiki/quickstart.md` (the wiki is
-never inlined into them). If neither file exists, `/AGENTS.md` is created with only that section.
-Only top-level files are touched — never nested ones — and only the OpenWiki section, never
-unrelated formatting.
+As of `v0.3.3`, upstream **reversed** this behavior from earlier versions: a run does **not**
+create or update the repo's top-level `/AGENTS.md` or `/CLAUDE.md`. `commands/wiki.md`'s Step 3
+system prompt says so explicitly ("Do not create or update repository `/AGENTS.md` or `/CLAUDE.md`
+files during normal code wiki runs"), and the headless-permissions allowlist at the bottom of
+`commands/wiki.md` deliberately omits `Write`/`Edit` grants for either file — enforcement doesn't
+rest solely on the model obeying its own prompt. If a repository's agent instructions already
+reference OpenWiki, a run keeps those references accurate but does not edit them unless explicitly
+asked. `openwiki/INSTRUCTIONS.md`, when present, is treated the same way: read for scope and
+priorities, never rewritten as part of routine init/update runs.
 
 ## Auto-run via a Stop/SessionEnd hook
 
@@ -126,15 +155,17 @@ answers "did *upstream* change?" — and it exists because nothing here can answ
 
 This port reproduces a slice of `langchain-ai/openwiki` as **prose inside prompt files**. There is
 no import, no lockfile entry, no dependency edge of any kind. Upstream can rewrite the system
-prompt and every check in this repo still passes. That is exactly how the port reached `v0.3.3`
-upstream while still reproducing `0.0.4` — six weeks with no signal.
+prompt and every check in this repo still passes — that gap is exactly how the port spent six
+weeks tracking upstream `0.0.4` while upstream had already moved to `v0.3.3` before the OW-3
+re-port closed it.
 
 So the drift is polled instead:
 
-- [`upstream.lock.json`](../upstream.lock.json) pins `trackedRef` (the upstream ref the port was
-  built from) and, per reproduced file, a SHA-256 plus a `why` note naming what in this repo
-  depends on it. Tracked today: `src/agent/prompt.ts`, `src/agent/prompts/code.ts`,
-  `src/agent/utils.ts`, `src/agent/index.ts`.
+- [`upstream.lock.json`](../upstream.lock.json) pins `trackedRef` (now `v0.3.3`, the ref this port
+  was re-ported from) and, per reproduced file, a SHA-256 plus a `why` note naming what in this
+  repo depends on it. Tracked today: `src/agent/index.ts`, `src/agent/prompt.ts`,
+  `src/agent/prompts/code.ts`, `src/agent/utils.ts`, `src/okf/frontmatter.ts`,
+  `src/okf/index-sync.ts` — the last two backing `scripts/openwiki-finalize.py`'s Step 3b passes.
 - [`scripts/check-upstream-drift.sh`](../scripts/check-upstream-drift.sh) resolves the latest
   upstream release, re-hashes each tracked file at that ref, and diffs against the lock. Exit `0`
   clean, `1` drift, `2` the check itself is broken (missing `jq`, unreachable API, bad `--ref`) —
@@ -145,9 +176,11 @@ So the drift is polled instead:
   trains you to ignore the label. It also runs on pull requests touching the lock or the script,
   so a hand-edited lock fails the PR.
 
-A file recorded as `GONE` does not exist at `trackedRef`. That is not an error: it is how the lock
-says "upstream has this and the port does not cover it yet", which is the current state of
-`src/agent/prompts/code.ts`.
+A file recorded as `GONE` would mean it does not exist at `trackedRef` — the lock's way of saying
+"upstream has this and the port does not cover it yet". None of the currently tracked files are in
+that state; what upstream ships and this port still doesn't cover (personal output mode, the chat
+prompt, `--language`, the critic/verifier subagent prompts) is recorded instead in
+`upstream.lock.json`'s `notCovered` map and in [Fidelity to upstream](../README.md#fidelity-to-upstream).
 
 **Two traps worth keeping.** Never hash a file body captured through `$(...)` — command
 substitution strips trailing newlines, so every hash silently shifts and the check reports drift
