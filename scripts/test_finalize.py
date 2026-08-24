@@ -209,26 +209,6 @@ class TestIndexes(TempWiki):
         self.assertIn("(foo%281%29.md)", out)
         self.assertIn("(has%20space.md)", out)
 
-    def test_symlinked_directory_is_skipped_and_does_not_escape_wiki(self):
-        """FIX 6: a symlinked directory inside the wiki must not get an
-        index.md written through the symlink into the target outside
-        openwiki/."""
-        outside = self.tmp / "outside"
-        outside.mkdir()
-        (outside / "page.md").write_text("# Page\n\nBody.\n", encoding="utf-8")
-        link = self.wiki / "linkdir"
-        try:
-            link.symlink_to(outside, target_is_directory=True)
-        except (OSError, NotImplementedError):
-            self.skipTest("symlinks not supported on this platform/filesystem")
-
-        finalize.pass_indexes(self.wiki)
-
-        self.assertFalse((outside / "index.md").exists(),
-                          "must never write outside openwiki/")
-        self.assertFalse((self.wiki / "linkdir" / "index.md").exists())
-
-
 MARKER = "openwiki: broken internal link"
 
 
@@ -550,17 +530,26 @@ class TestLinks(TempWiki):
 
 class TestIdempotence(TempWiki):
     def snapshot(self):
+        # os.walk defaults to followlinks=False: it must never descend into
+        # a symlinked directory (a loop back to self.wiki included), the
+        # same rule finalize._iter_dirs applies.
         result = {}
-        for p in sorted(self.wiki.rglob("*.md")):
-            with open(p, encoding="utf-8", newline="") as f:
-                result[str(p.relative_to(self.wiki))] = f.read()
+        for dirpath, dirnames, filenames in os.walk(self.wiki, followlinks=False):
+            dirnames.sort()
+            for name in sorted(filenames):
+                if name.endswith(".md"):
+                    p = pathlib.Path(dirpath) / name
+                    with open(p, encoding="utf-8", newline="") as f:
+                        result[str(p.relative_to(self.wiki))] = f.read()
         return result
 
     def run_cli(self):
         script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
+        # A generous but finite timeout: a symlink loop that somehow got
+        # walked into should fail this test loudly, not hang the suite.
         return subprocess.run(
             [sys.executable, str(script), str(self.wiki)],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=10,
         )
 
     def test_two_consecutive_runs_are_byte_identical(self):
@@ -656,6 +645,92 @@ class TestIdempotence(TempWiki):
 
         self.assertEqual(after_one, after_two)
         self.assertIn("indexes 0, links 0", second.stdout)
+
+    def test_symlinked_directory_converges_and_does_not_escape_wiki(self):
+        """FIX 6 regression: a symlinked directory must be invisible to the
+        index machinery end to end -- not just skipped when generating its
+        own index. render_index must not list it as an entry either, or the
+        parent index.md forever references a linkdir/index.md that never
+        exists, pass_links forever re-flags it broken, and the wiki never
+        reaches a no-op."""
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (outside / "page.md").write_text("# Page\n\nBody.\n", encoding="utf-8")
+        link = self.wiki / "linkdir"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported on this platform/filesystem")
+
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+
+        first = self.run_cli()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        after_one = self.snapshot()
+
+        self.assertFalse((outside / "index.md").exists(),
+                          "must never write outside openwiki/")
+        self.assertFalse((self.wiki / "linkdir" / "index.md").exists())
+        self.assertNotIn("linkdir", after_one.get("index.md", ""),
+                          "a symlinked directory must not be listed as an index entry")
+
+        second = self.run_cli()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("front matter 0, indexes 0, links 0", second.stdout)
+        after_two = self.snapshot()
+        self.assertEqual(after_one, after_two, "second run must be byte-identical")
+
+        third = self.run_cli()
+        self.assertEqual(third.returncode, 0, third.stderr)
+        self.assertIn("front matter 0, indexes 0, links 0", third.stdout)
+        self.assertEqual(self.snapshot(), after_two, "third run must be byte-identical")
+
+    def test_symlink_loop_does_not_hang_and_still_converges(self):
+        """A symlinked directory that loops back on itself must not be
+        walked into at all (see _iter_dirs), so it can never cause a hang,
+        and the rest of the wiki still reaches a true no-op."""
+        loop = self.wiki / "loop"
+        try:
+            loop.symlink_to(self.wiki, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported on this platform/filesystem")
+
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+
+        first = self.run_cli()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        after_one = self.snapshot()
+        self.assertNotIn("loop", after_one.get("index.md", ""))
+
+        second = self.run_cli()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("front matter 0, indexes 0, links 0", second.stdout)
+        self.assertEqual(self.snapshot(), after_one, "second run must be byte-identical")
+
+    def test_symlinked_file_is_processed_like_any_other_page(self):
+        """A symlinked *file* (as opposed to a directory) is not the escape
+        vector FIX 6 addresses -- it points at one specific file, not an
+        arbitrary subtree -- and continues to be finalized like any other
+        markdown page, converging to a no-op."""
+        real = self.tmp / "real.md"
+        real.write_text("# Real\n\nBody.\n", encoding="utf-8")
+        link = self.wiki / "linked.md"
+        try:
+            link.symlink_to(real)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported on this platform/filesystem")
+
+        first = self.run_cli()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        # The symlinked page is a real, writable, live file and gets front
+        # matter backfilled through the link, same as any other page.
+        self.assertTrue(real.read_text(encoding="utf-8").startswith("---\n"))
+        after_one = self.snapshot()
+
+        second = self.run_cli()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("front matter 0, indexes 0, links 0", second.stdout)
+        self.assertEqual(self.snapshot(), after_one, "second run must be byte-identical")
 
 
 if __name__ == "__main__":

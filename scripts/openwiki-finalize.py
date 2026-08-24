@@ -174,8 +174,43 @@ def write_text_or_skip(path, content):
         return False
 
 
+def _iter_dirs(root):
+    """Yield root and every subdirectory beneath it, never descending into a
+    symlinked directory.
+
+    A symlinked directory can point anywhere (including outside the wiki),
+    so every markdown-finding pass must treat it -- and everything beneath
+    it -- as invisible, consistently with pass_indexes never writing an
+    index.md into one. Never following a symlink also makes a symlink loop
+    structurally impossible to hang on: a loop is made entirely of
+    symlinks, and none of them are ever traversed.
+    """
+    yield root
+    try:
+        children = sorted(root.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return
+    for child in children:
+        try:
+            is_real_dir = child.is_dir() and not child.is_symlink()
+        except OSError:
+            continue
+        if is_real_dir:
+            yield from _iter_dirs(child)
+
+
 def markdown_files(wiki):
-    return sorted(p for p in wiki.rglob("*.md") if p.is_file())
+    files = []
+    for directory in _iter_dirs(wiki):
+        try:
+            children = directory.iterdir()
+        except OSError:
+            continue
+        files.extend(
+            child for child in children
+            if child.suffix == ".md" and child.is_file()
+        )
+    return sorted(files)
 
 
 def pass_frontmatter(wiki):
@@ -210,10 +245,21 @@ def _escape_label(label):
 
 
 def _has_real_markdown(directory):
-    """Check if directory has any non-reserved markdown files."""
-    for md_file in directory.rglob("*.md"):
-        if md_file.name not in RESERVED:
-            return True
+    """Check if directory has any non-reserved markdown files.
+
+    Never descends into a symlinked subdirectory -- see _iter_dirs -- so a
+    directory whose only markdown lives behind a symlink is correctly
+    reported as empty, matching pass_indexes' refusal to write through
+    that symlink.
+    """
+    for d in _iter_dirs(directory):
+        try:
+            children = d.iterdir()
+        except OSError:
+            continue
+        for child in children:
+            if child.suffix == ".md" and child.is_file() and child.name not in RESERVED:
+                return True
     return False
 
 
@@ -237,7 +283,7 @@ def render_index(directory, wiki):
     """Render a directory index. Deterministic: entries are sorted by href."""
     entries = []
     for child in sorted(directory.iterdir(), key=lambda p: p.name):
-        if child.is_dir():
+        if child.is_dir() and not child.is_symlink():
             if _has_real_markdown(child):
                 entries.append((
                     "%s/index.md" % _encode_href(child.name),
@@ -262,10 +308,10 @@ def pass_indexes(wiki):
     # A symlinked directory can point outside the wiki (e.g.
     # openwiki/linkdir -> ../outside); writing its index.md would then land
     # outside openwiki/, violating the "writes only inside openwiki/"
-    # guarantee. Skip symlinks entirely -- real directories only.
-    directories = [wiki] + [
-        d for d in sorted(wiki.rglob("*")) if d.is_dir() and not d.is_symlink()
-    ]
+    # guarantee. _iter_dirs never descends into one, so it is invisible here
+    # exactly as it is to _has_real_markdown and render_index above -- and a
+    # symlink loop can never be walked into in the first place.
+    directories = sorted(_iter_dirs(wiki), key=str)
     for directory in directories:
         target = directory / "index.md"
 
