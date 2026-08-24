@@ -72,6 +72,10 @@ pulls new versions.
 > Plugin commands are always namespaced `plugin:command`, so the command is `/openwiki:wiki`
 > (never a bare `/openwiki`). Install manually instead if you want a bare `/wiki`.
 
+> Pick **one** install path. The marketplace plugin and `npx skills add` both work on Claude Code,
+> but together they expose the same prompt twice — `/openwiki:wiki` and an `openwiki` skill — and
+> the two can be at different versions.
+
 ### Manual (no marketplace)
 
 Copy the single command file into the repo you want to document, or globally. Under
@@ -84,6 +88,14 @@ cp commands/wiki.md your-repo/.claude/commands/
 
 # or global → /wiki everywhere
 cp commands/wiki.md ~/.claude/commands/
+```
+
+The command looks for the Step 3b finalizer next to a known install root, so copy it too —
+otherwise the run completes but skips front matter, indexes, and link checks:
+
+```bash
+mkdir -p ~/.claude/skills/openwiki/scripts
+cp scripts/openwiki-finalize.py ~/.claude/skills/openwiki/scripts/
 ```
 
 ## Install — Codex and opencode

@@ -1,0 +1,25 @@
+name: Tests
+
+# The finalizer ships twice — scripts/openwiki-finalize.py and its twin inside
+# .agents/skills/openwiki/scripts/. Only test_finalize.py's TestShippedCopy keeps
+# them identical, so it has to run on every change or installed skills silently
+# run stale finalize logic.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Finalizer tests (includes the shipped-copy drift guard)
+        run: python3 scripts/test_finalize.py
+
+      - name: Auto-run gate tests
+        run: sh hooks/test_gate.sh

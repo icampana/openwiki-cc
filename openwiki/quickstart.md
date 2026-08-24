@@ -114,6 +114,7 @@ Documentation quality depends directly on the model — a small/fast tier produc
   [Fidelity to upstream](../README.md#fidelity-to-upstream) in the same change. Skipping the
   `--update` leaves the lock asserting an older ref; running it *without* re-porting silences the
   alarm while the port stays stale.
-- **Finalizer logic** → [`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py). The skill ships an identical twin at [`openwiki/scripts/`](../.agents/skills/openwiki/scripts/) so installed-skill runs get Step 3b; `python3 scripts/test_finalize.py` fails when they drift — update both.
+- **Finalizer logic** → [`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py). The skill ships an identical twin at [`openwiki/scripts/`](../.agents/skills/openwiki/scripts/) so installed-skill runs get Step 3b; `python3 scripts/test_finalize.py` fails when they drift — update both. [`.github/workflows/tests.yml`](../.github/workflows/tests.yml) runs that guard, plus the gate tests, on every push and pull request.
+- **Step 3b script lookup** → the `ls` ladder in [`commands/wiki.md`](../commands/wiki.md) and [`SKILL.md`](../.agents/skills/openwiki/SKILL.md). Add a path there whenever a new install layout appears; the two ladders must stay identical.
 - **Auto-run gate** → [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh); run
   `sh hooks/test_gate.sh` after any change to it (it exercises every skip/run branch).

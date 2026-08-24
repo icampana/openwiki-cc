@@ -86,7 +86,10 @@ what changed evidence affects, no formatting-only churn, and no-op allowed. `_pl
 before the run ends.
 
 **Step 3b — finalize (deterministic, no model involved).** Runs
-[`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) — three passes reproducing
+[`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) — located first by an `ls` over
+every install layout (plugin root via `$CLAUDE_PLUGIN_ROOT`, project- and user-scoped skill
+directories, repository checkout), because the working directory during a run is the *target*
+repository, not the install. Three passes reproducing
 upstream `src/okf/frontmatter.ts`, `src/okf/index-sync.ts`, and `src/agent/wiki-link-validator.ts`:
 backfill OKF front matter on any page missing it (tagging inferred fields
 `openwiki_generated: true` for a later run to upgrade with real content), regenerate every

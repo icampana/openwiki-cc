@@ -344,10 +344,23 @@ ATX_RE = re.compile(r"^(#{1,6})\s+(.*)$", re.M)
 
 
 def slugify(heading):
-    """GitHub-style anchor slug."""
+    """GitHub-style anchor slug, collapsing runs of whitespace to one hyphen."""
     text = heading.strip().lower()
     text = re.sub(r"[^\w\s-]", "", text)
     return re.sub(r"[\s]+", "-", text).strip("-")
+
+
+def slugify_uncollapsed(heading):
+    """Same, but one hyphen per whitespace character rather than per run.
+
+    Dropping punctuation between words leaves the spaces that surrounded it,
+    and GitHub hyphenates each one: "Install - a b" becomes
+    "install--a-b", not "install-a-b". Both spellings are accepted so a
+    correct anchor is never annotated as broken.
+    """
+    text = heading.strip().lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    return re.sub(r"\s", "-", text).strip("-")
 
 
 def headings(text):
@@ -367,6 +380,11 @@ def headings(text):
         else:
             seen[slug] += 1
             slugs.append(f"{slug}-{seen[slug]}")
+        # Accept the uncollapsed spelling of the same heading. Only ever
+        # additive, so it can widen what passes but never narrow it.
+        alt = slugify_uncollapsed(m.group(2))
+        if alt != slug:
+            slugs.append(alt)
     return set(slugs)
 
 

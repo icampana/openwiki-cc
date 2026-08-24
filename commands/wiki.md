@@ -435,10 +435,21 @@ Link integrity:
 ## Step 3b — Finalize the wiki (deterministic, run AFTER the wiki work)
 
 Upstream does this in harness code (`src/okf/frontmatter.ts`, `src/okf/index-sync.ts`,
-`src/agent/wiki-link-validator.ts`). Here it is one script:
+`src/agent/wiki-link-validator.ts`). Here it is one script.
+
+First locate it. It ships with every install layout, but not always at the same path, and
+the working directory is the *target* repository rather than the install:
 
 ```bash
-python3 scripts/openwiki-finalize.py openwiki
+ls "$CLAUDE_PLUGIN_ROOT/scripts/openwiki-finalize.py" .claude/skills/openwiki/scripts/openwiki-finalize.py .agents/skills/openwiki/scripts/openwiki-finalize.py "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py" scripts/openwiki-finalize.py 2>/dev/null | head -1
+```
+
+`ls` sorts its operands, so with several layouts present the winner is whichever path sorts
+first, not the order listed. Every copy is byte-identical (CI enforces it), so any hit is correct.
+Then run the path it prints, by that absolute path:
+
+```bash
+python3 <the path from the previous command> openwiki
 ```
 
 It backfills OKF front matter on any page missing it (tagging its guesses
@@ -449,8 +460,9 @@ Run it BEFORE Step 4 — its writes must land inside the snapshot window, or the
 will not see them. It is idempotent, so a genuine no-op run leaves every file byte-identical and
 Step 4 correctly writes nothing.
 
-If the plugin is installed from a marketplace, the script lives in the plugin directory rather
-than the target repo; invoke it by its absolute path.
+If the `ls` prints nothing, the script is genuinely unavailable: say so in your final message and
+skip this step. Do not hand-write front matter or indexes — that is non-deterministic and would
+break the no-op contract of Step 4.
 
 ## Step 4 — Persist metadata (idempotence, run AFTER the wiki work)
 
@@ -524,7 +536,8 @@ allowlist. In `.claude/settings.json`:
       "Bash(git --no-pager diff:*)",
       "Bash(git --no-pager show:*)",
       "Bash(git --no-pager blame:*)",
-      "Bash(python3 scripts/openwiki-finalize.py:*)",
+      "Bash(python3:*)",
+      "Bash(ls:*)",
       "Bash(find:*)",
       "Bash(sha256sum:*)",
       "Bash(rg:*)",
@@ -535,6 +548,14 @@ allowlist. In `.claude/settings.json`:
   }
 }
 ```
+
+`Bash(python3:*)` is broader than the path-pinned entry it replaces, and the trade-off is
+deliberate: under a plugin or skill install the finalizer sits at an absolute, version-dependent
+path that no static prefix can match, so pinning the path blocks Step 3b rather than permitting
+it. Be aware of what you are granting — `python3` can write anywhere, so this entry is wider than
+the `Edit`/`Write` scoping below it. If that matters more to you than Step 3b, drop both
+`Bash(python3:*)` and `Bash(ls:*)`; the run then reports the finalizer as unavailable and skips
+the step instead of failing. `Bash(ls:*)` on its own only covers the lookup.
 
 `AGENTS.md` / `CLAUDE.md` are deliberately absent from this allowlist: the `v0.3.3` prompt above
 already forbids writing them during normal runs, and granting the permission anyway would leave

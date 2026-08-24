@@ -457,10 +457,21 @@ Link integrity:
 ## Step 3b — Finalize the wiki (deterministic, run AFTER the wiki work)
 
 Upstream does this in harness code (`src/okf/frontmatter.ts`, `src/okf/index-sync.ts`,
-`src/agent/wiki-link-validator.ts`). Here it is one script:
+`src/agent/wiki-link-validator.ts`). Here it is one script.
+
+First locate it. It ships with every install layout, but not always at the same path, and
+the working directory is the *target* repository rather than the install:
 
 ```bash
-python3 scripts/openwiki-finalize.py openwiki
+ls "$CLAUDE_PLUGIN_ROOT/scripts/openwiki-finalize.py" .claude/skills/openwiki/scripts/openwiki-finalize.py .agents/skills/openwiki/scripts/openwiki-finalize.py "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py" scripts/openwiki-finalize.py 2>/dev/null | head -1
+```
+
+`ls` sorts its operands, so with several layouts present the winner is whichever path sorts
+first, not the order listed. Every copy is byte-identical (CI enforces it), so any hit is correct.
+Then run the path it prints, by that absolute path:
+
+```bash
+python3 <the path from the previous command> openwiki
 ```
 
 It backfills OKF front matter on any page missing it (tagging its guesses
@@ -471,12 +482,9 @@ Run it BEFORE Step 4 — its writes must land inside the snapshot window, or the
 will not see them. It is idempotent, so a genuine no-op run leaves every file byte-identical and
 Step 4 correctly writes nothing.
 
-This step needs `openwiki-finalize.py`, which ships beside this `SKILL.md` at
-`scripts/openwiki-finalize.py`; call it by absolute path. When running inside a checkout of this
-repository rather than an installed copy, the identical script also lives at the repository root
-(`scripts/openwiki-finalize.py`) — use whichever applies. If neither is found, say so in your final
-message and skip the step — do not hand-write front matter or indexes, which would be
-non-deterministic and would break the no-op contract.
+If the `ls` prints nothing, the script is genuinely unavailable: say so in your final message and
+skip this step. Do not hand-write front matter or indexes — that is non-deterministic and would
+break the no-op contract of Step 4.
 
 ## Step 4 — Persist metadata (idempotence, run AFTER the wiki work)
 
