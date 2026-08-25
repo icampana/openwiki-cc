@@ -80,8 +80,9 @@ not retyped) against the evidence: inventory the repo (tree, config, entrypoints
 files per domain — never `glob **/*` from root, never read every file), write a temporary
 `openwiki/_plan.md`, then write `quickstart.md` + section pages. Discipline baked into the prompt:
 no stub pages, no single-file directories unless the boundary is real, each concept gets one
-canonical home. Every generated page carries OKF v0.1 YAML front matter (`type` required); `index.md`
-and `log.md` are reserved and never get concept front matter. Update mode is surgical — edit only
+canonical home. Every generated page carries OKF v0.1 YAML front matter (`type` required); `index.md`,
+`log.md`, `_plan.md`, and `_sidebar.md` are reserved and never get concept front matter
+(`_sidebar.md` is a Docsify navigation partial, not a document). Update mode is surgical — edit only
 what changed evidence affects, no formatting-only churn, and no-op allowed. `_plan.md` is deleted
 before the run ends.
 

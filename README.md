@@ -301,13 +301,27 @@ contrast, are reproduced.
 
 From `v0.3.3`, every generated page carries YAML front matter following the Google Knowledge
 Catalog OKF v0.1 schema — `type` is required, `title` and `description` are recommended, and
-producer-defined extension fields are valid and preserved across runs. `index.md` and `log.md` are
-reserved and never receive it.
+producer-defined extension fields are valid and preserved across runs. `index.md`, `log.md`,
+`_plan.md`, and `_sidebar.md` are reserved and never receive it — `_sidebar.md` is a Docsify
+navigation partial, so front matter injected there renders as navigation, not metadata.
 
 If you already have an `openwiki/` from an earlier version, no migration step is needed. Front
 matter is additive, and [`scripts/openwiki-finalize.py`](scripts/openwiki-finalize.py) backfills
 it on the next run, tagging anything it inferred with `openwiki_generated: true` so a later run
 can replace the guess with a real description. Nothing is deleted.
+
+Two notes if you are upgrading a wiki that already exists:
+
+- If your `openwiki/` holds a `_sidebar.md`, the first run after upgrading rewrites the root
+  `index.md` once, because the sidebar drops out of the generated listing. That single rewrite is
+  the corrected output, not churn: the run is not a no-op, so `.last-update.json` is rewritten
+  too. Runs after it are no-ops again.
+- If an earlier version already injected front matter into your `_sidebar.md`, delete that block by
+  hand once. The finalizer never removes content, so it stops adding the block but cannot clean up
+  a sidebar that already carries one.
+- Exempt `index.md` from any orphan or wiki-link check you run in CI. Generated indexes are
+  deliberately absent from `_sidebar.md`, so a checker that treats "not reachable from the
+  sidebar" as an orphan reports every one of them.
 
 ### Detecting drift
 

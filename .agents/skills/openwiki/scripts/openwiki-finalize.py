@@ -20,7 +20,7 @@ import re
 import sys
 import urllib.parse
 
-RESERVED = {"index.md", "log.md", "_plan.md"}
+RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md"}
 GENERATED_FIELD = "openwiki_generated"
 FALLBACK_TYPE = "Reference"
 
