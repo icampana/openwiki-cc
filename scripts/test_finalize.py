@@ -91,6 +91,14 @@ class TestFrontmatter(TempWiki):
         finalize.pass_frontmatter(self.wiki)
         self.assertNotIn("type:", plan.read_text(encoding="utf-8"))
 
+    def test_sidebar_file_gets_no_frontmatter(self):
+        """_sidebar.md is the Docsify navigation partial, not a concept page.
+        Front matter injected here renders as nav content, and the derived
+        description is whatever the first line happens to be."""
+        sidebar = self.write("_sidebar.md", "<!-- nav -->\n\n- [Home](/index.md)\n")
+        finalize.pass_frontmatter(self.wiki)
+        self.assertNotIn("type:", sidebar.read_text(encoding="utf-8"))
+
     def test_crlf_frontmatter_is_byte_identical(self):
         """A valid CRLF file should not be modified."""
         original = "---\r\ntype: Playbook\r\ntitle: Kept\r\n---\r\n\r\n# Kept\r\n\r\nBody.\r\n"
@@ -198,6 +206,19 @@ class TestIndexes(TempWiki):
         self.assertNotIn("scratch", root_out)
         # A directory holding only _plan.md has no real content: no index.
         self.assertFalse((self.wiki / "scratch" / "index.md").exists())
+
+    def test_sidebar_file_is_never_an_index_entry_or_counted_as_content(self):
+        """_sidebar.md must not appear in any index, and a directory holding
+        only a sidebar must not be treated as having real content."""
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("_sidebar.md", "<!-- nav -->\n\n- [Home](/index.md)\n")
+        self.write("nav/_sidebar.md", "<!-- nav -->\n\n- [Home](/index.md)\n")
+        finalize.pass_indexes(self.wiki)
+        root_out = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertNotIn("_sidebar", root_out)
+        self.assertNotIn("nav", root_out)
+        # A directory holding only _sidebar.md has no real content: no index.
+        self.assertFalse((self.wiki / "nav" / "index.md").exists())
 
     def test_parenthesized_and_spaced_filenames_get_resolvable_hrefs(self):
         """FIX 5: render_index must not author a broken href for filenames

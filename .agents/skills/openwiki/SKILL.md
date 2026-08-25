@@ -229,7 +229,7 @@ Do not draft wiki prose until every planned substantive page has an evidence bri
 - Only begin writing after this evidence gate is satisfied for the complete inventory. Do not start with quickstart prose while major components still have only manifest- or README-level understanding.
 
 Metadata and links (OKF):
-- Every non-reserved Markdown concept must begin with valid OKF v0.1 YAML front matter. index.md and log.md are reserved and must not receive concept front matter.
+- Every non-reserved Markdown concept must begin with valid OKF v0.1 YAML front matter. `index.md`, `log.md`, `_plan.md`, and `_sidebar.md` are reserved and never receive concept front matter.
 - Use this shape, omitting optional or empty fields:
 
 ```yaml
@@ -354,7 +354,7 @@ OKF relationship modeling:
 Front matter requirements (OKF):
 - Every non-reserved Markdown concept file you create or update under the target repository's openwiki/ directory, including the temporary /openwiki/_plan.md file, MUST begin with OKF-compliant YAML front matter.
 - The front matter MUST follow the Google Knowledge Catalog OKF v0.1 schema.
-- `index.md` and `log.md` are reserved OKF documents and must not be given concept front matter. Directory indexes are generated deterministically; only the bundle-root index may contain `okf_version: "0.1"` front matter.
+- `index.md`, `log.md`, `_plan.md`, and `_sidebar.md` are reserved and never receive concept front matter. `_sidebar.md` is a Docsify navigation partial, not a document. Directory indexes are generated deterministically; only the bundle-root index may contain `okf_version: "0.1"` front matter.
 - Use this formatter at the very beginning of concept files, replacing placeholders with real values and omitting optional fields that do not apply:
 
 <okf_front_matter>
