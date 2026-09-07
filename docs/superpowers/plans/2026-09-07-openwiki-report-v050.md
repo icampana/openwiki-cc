@@ -736,7 +736,7 @@ class TestIdempotence(TempWiki):
         self.write("arch/overview.md", "# Overview\n\nSee [gone](nope.md) and [qs](../quickstart.md).\n")
         self.full_run()
         after_one = self.snapshot()
-        state = self.tmp / "openwiki-run.json"
+        state = self.tmp / ".openwiki-run.json"
         self.assertFalse(state.exists(), "finalize mode must consume the state file")
         self.full_run()
         self.assertEqual(self.snapshot(), after_one)
@@ -761,7 +761,7 @@ class TestIdempotence(TempWiki):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python3 scripts/test_finalize.py -k "TestProvenancePass or TestIdempotence"`
+Run: `python3 scripts/test_finalize.py TestProvenancePass TestIdempotence`
 Expected: FAIL — `pass_provenance` does not exist; the rewritten idempotence test fails on default-only semantics.
 
 - [ ] **Step 3: Write the minimal implementation**
@@ -862,7 +862,7 @@ Note: default mode **no longer runs `pass_frontmatter`** — migration moved to 
 - [ ] **Step 4: Run the full suite**
 
 Run: `python3 scripts/test_finalize.py`
-Expected: PASS. Count: 65 (Task 4) + 4 new pass tests, with the rewritten idempotence tests holding the same count (3 replaced by 3) = **69 total**.
+Expected: PASS. Count: 65 (Task 4) + 4 new pass tests + 1 actor-sanitization test = **70 total**. (The rewritten TestIdempotence keeps its pre-existing extra convergence tests, adapted to full-run sequences — do not delete them.)
 
 - [ ] **Step 5: Refresh the shipped twin and commit**
 
@@ -1442,7 +1442,7 @@ python3 scripts/test_finalize.py
 sh hooks/test_gate.sh
 GITHUB_TOKEN=$(gh auth token) sh scripts/check-upstream-drift.sh; echo "drift EXIT=$?"
 ```
-Expected: 69 finalizer tests pass, all 7 gate scenarios pass, drift exits 0.
+Expected: 70 finalizer tests pass, all 7 gate scenarios pass, drift exits 0.
 
 - [ ] **Step 2: Run the real command against this repo**
 
