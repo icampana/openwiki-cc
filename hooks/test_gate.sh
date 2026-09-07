@@ -35,6 +35,11 @@ run "no metadata file" spawn
 printf '{"gitHead": "%s"}\n' "$H" > openwiki/.last-update.json
 run "clean tree, HEAD unchanged" skip
 
+# metadata refreshed in place by a no-op run (upstream #647: updatedAt always
+# refreshes) → still skip; only .last-update.json differs
+printf '{"gitHead": "%s", "updatedAt": "2026-09-07T12:00:00.000Z", "command": "update", "model": "m", "status": "complete"}\n' "$H" > openwiki/.last-update.json
+run "metadata refreshed on no-op" skip
+
 # dirty source file → spawn
 echo change >> file.txt
 run "dirty source file" spawn
