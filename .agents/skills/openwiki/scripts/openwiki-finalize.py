@@ -563,6 +563,91 @@ def read_generated_event(text):
     return None
 
 
+def _is_key_line(line, key):
+    """Whether a front-matter line assigns the top-level `key`."""
+    stripped = line.strip()
+    return (stripped == key or stripped.startswith(key + ":")
+            or stripped.startswith(key + " :"))
+
+
+def _split_fields(text):
+    """Return (newline, field_lines, body) for a document known to carry a
+    front matter block."""
+    fields_text, body = split_frontmatter(text)
+    newline = "\r\n" if "\r\n" in fields_text else "\n"
+    lines = fields_text.split(newline)
+    if lines and lines[-1] == "":
+        lines.pop()
+    return newline, lines, body
+
+
+def set_generated_event(text, by, at):
+    """Set or replace the `generated: { by, at }` flow mapping.
+
+    Upstream's exact rendering: a single-line flow mapping. Replaced in place,
+    appended at the end of the block when absent, so positions are stable.
+    """
+    line = ("generated: { by: %s }" % by if at is None
+            else "generated: { by: %s, at: %s }" % (by, at))
+    fields_text, body = split_frontmatter(text)
+    if fields_text is None:
+        # No block at all (migrate normally guarantees one); create minimal.
+        return "---\n%s\n---\n\n%s" % (line, body.lstrip("\r\n"))
+    newline, lines, body = _split_fields(text)
+    out = [line if _is_key_line(l, "generated") else l for l in lines]
+    if not any(_is_key_line(l, "generated") for l in lines):
+        out.append(line)
+    return "---" + newline + newline.join(out) + newline + "---" + newline + body
+
+
+def remove_field(text, key):
+    """Drop every top-level `key:` line from the front matter block."""
+    fields_text, _ = split_frontmatter(text)
+    if fields_text is None:
+        return text
+    newline, lines, body = _split_fields(text)
+    out = [l for l in lines if not _is_key_line(l, key)]
+    return "---" + newline + newline.join(out) + newline + "---" + newline + body
+
+
+def canonicalize_terminal(text):
+    """Upstream `canonicalizeChangedConcept`: changed pages end in exactly one
+    LF. Nothing else is touched."""
+    return re.sub(r"[\r\n]*\Z", "", text) + "\n"
+
+
+def restore_generated_event(text, prior):
+    """Unchanged body: put back the pre-run event when the agent removed or
+    altered it; remove any stamp when the page was previously unstamped."""
+    current = read_generated_event(text)
+    if prior is None:
+        return text if current is None else remove_field(text, "generated")
+    if (current and current.get("by") == prior.get("by")
+            and current.get("at") == prior.get("at")):
+        return text
+    return set_generated_event(text, prior["by"], prior.get("at"))
+
+
+def repair_frontmatter(text):
+    """Minimal OKF repair: drop an unparseable `generated` line and empty
+    optional scalars. `openwiki_translation_pending` — a code-managed marker —
+    is never touched."""
+    fields_text, _ = split_frontmatter(text)
+    if fields_text is None:
+        return text
+    newline, lines, body = _split_fields(text)
+    out = []
+    for line in lines:
+        key = line.split(":", 1)[0].strip() if ":" in line else None
+        if key == "generated" and not _GENERATED_RE.match(line):
+            continue
+        if (key in ("title", "description", "resource")
+                and not line.split(":", 1)[1].strip()):
+            continue
+        out.append(line)
+    return "---" + newline + newline.join(out) + newline + "---" + newline + body
+
+
 def body_hash(text):
     """SHA-256 of the body excluding front matter, whitespace retained.
 

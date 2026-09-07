@@ -832,6 +832,64 @@ class TestSnapshot(TempWiki):
         self.assertEqual(pages, ["real.md"])
 
 
+class TestProvenancePrimitives(TempWiki):
+    def test_set_replaces_existing_event_in_place(self):
+        text = '---\ntype: Playbook\ntitle: A\ngenerated: { by: old, at: 2020-01-01T00:00:00Z }\n---\n\n# A\n\nB.\n'
+        out = finalize.set_generated_event(text, "m", "2026-09-07T12:00:00Z")
+        fields, _ = finalize.split_frontmatter(out)
+        self.assertEqual(finalize.parse_fields(fields)["type"], "Playbook")
+        self.assertIn("generated: { by: m, at: 2026-09-07T12:00:00Z }", out)
+        self.assertNotIn("by: old", out)
+
+    def test_set_appends_when_absent(self):
+        text = '---\ntype: Playbook\ntitle: A\n---\n\n# A\n\nB.\n'
+        out = finalize.set_generated_event(text, "m", "2026-09-07T12:00:00Z")
+        self.assertIn("generated: { by: m, at: 2026-09-07T12:00:00Z }", out)
+        self.assertTrue(finalize.split_frontmatter(out)[1].endswith("# A\n\nB.\n"))
+
+    def test_set_without_at_omits_at(self):
+        text = '---\ntype: Playbook\n---\n\n# A\n'
+        out = finalize.set_generated_event(text, "m", None)
+        self.assertIn("generated: { by: m }", out)
+
+    def test_remove_field_drops_legacy_timestamp(self):
+        text = '---\ntype: Playbook\ntimestamp: 2024-01-01\ntitle: A\n---\n\n# A\n'
+        out = finalize.remove_field(text, "timestamp")
+        self.assertNotIn("timestamp", out)
+        self.assertIn("title: A", out)
+
+    def test_canonicalize_terminal_endings(self):
+        self.assertEqual(finalize.canonicalize_terminal("# A\n\n"), "# A\n")
+        self.assertEqual(finalize.canonicalize_terminal("# A"), "# A\n")
+        self.assertEqual(finalize.canonicalize_terminal("# A\n\n\n"), "# A\n")
+        self.assertEqual(finalize.canonicalize_terminal("# A\r\n\r\n"), "# A\n")
+
+    def test_restore_puts_back_tampered_event(self):
+        tampered = '---\ntype: P\ngenerated: { by: impostor, at: 2030-01-01T00:00:00Z }\n---\n\n# A\n'
+        out = finalize.restore_generated_event(
+            tampered, {"by": "m", "at": "2026-09-07T12:00:00Z"})
+        self.assertIn("generated: { by: m, at: 2026-09-07T12:00:00Z }", out)
+
+    def test_restore_removes_stamp_when_previously_unstamped(self):
+        stamped = '---\ntype: P\ngenerated: { by: m, at: 2026-09-07T12:00:00Z }\n---\n\n# A\n'
+        out = finalize.restore_generated_event(stamped, None)
+        self.assertNotIn("generated", out)
+        self.assertIn("type: P", out)
+
+    def test_repair_removes_invalid_generated_but_keeps_translation_marker(self):
+        text = ('---\ntype: P\ngenerated: someday-maybe\n'
+                'openwiki_translation_pending: true\n---\n\n# A\n')
+        out = finalize.repair_frontmatter(text)
+        self.assertNotIn("generated:", out)
+        self.assertIn("openwiki_translation_pending: true", out)
+
+    def test_repair_removes_empty_optional_scalars(self):
+        text = '---\ntype: P\ntitle:\n---\n\n# A\n'
+        out = finalize.repair_frontmatter(text)
+        self.assertNotIn("title:", out)
+        self.assertIn("type: P", out)
+
+
 class TestShippedCopy(unittest.TestCase):
     def test_skill_ships_an_identical_finalizer(self):
         """The skill folder carries its own copy for installed-skill runs.
