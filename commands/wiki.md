@@ -32,10 +32,10 @@ minimum) for comparable documentation quality. Do not run it on a small/fast mod
 
 ## Step 0 — Pre-run no-op check (update mode with no additional instruction only)
 
-Mirrors OpenWiki 0.0.4 `getUpdateNoopStatus` / `shouldCheckUpdateNoop`: skip the entire run
-(no subagents, no reads, no writes) when nothing relevant changed. Applies **only** in update
-mode **and only when `$ARGUMENTS` carried no additional instruction**. If an instruction was
-given, skip this step and proceed to Step 1.
+Mirrors OpenWiki `v0.5.0` `getUpdateNoopStatus` / `shouldCheckUpdateNoop`: skip the
+model work when nothing relevant changed. Applies **only** in update mode **and only
+when `$ARGUMENTS` carried no additional instruction**. If an instruction was given,
+skip this step and proceed to Step 1.
 
 Read `openwiki/.last-update.json`. If it has no `gitHead`, skip this check → go to Step 1.
 Otherwise run:
@@ -46,45 +46,45 @@ git --no-pager status --short --untracked-files=all
 git --no-pager diff --name-only <gitHead>..HEAD   # only if HEAD != gitHead
 ```
 
-Skip the whole run when **all** hold:
+Skip the model work when **all** hold:
 - `status --short` is empty after removing any line whose path is `openwiki/.last-update.json`;
 - HEAD == `gitHead`, **or** every path in `<gitHead>..HEAD` is under `openwiki/`.
 
-If skipped: report "wiki already current — no repository changes since `<gitHead>`" and stop
-without touching any files. Otherwise continue to Step 1.
+If skipped: refresh the run timestamp so freshness checks reflect the actual last run
+(upstream #647 — a no-op update still means OpenWiki ran), report "wiki already current —
+no repository changes since `<gitHead>`", and stop. Refresh with:
 
-## Step 1 — Collect git evidence (run BEFORE any write)
-
-First read `openwiki/.last-update.json` if it exists to recover `gitHead` and `updatedAt`.
-
-Then run these exact commands (all git invocations use `--no-pager`; git is read-only here):
-
-Always:
 ```bash
-git --no-pager status --short
-git --no-pager rev-parse HEAD
-git --no-pager diff --name-status HEAD
+ts=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+jq --arg t "$ts" '.updatedAt = $t' openwiki/.last-update.json > openwiki/.last-update.json.tmp \
+  && mv openwiki/.last-update.json.tmp openwiki/.last-update.json
 ```
 
-History, by mode:
-- **init**, or update with no prior metadata:
-  ```bash
-  git --no-pager log --max-count=20 --name-status --oneline
-  ```
-- **update** with a `gitHead` in `.last-update.json`:
-  ```bash
-  git --no-pager log <gitHead>..HEAD --name-status --oneline
-  ```
-- **update** with no `gitHead` but an `updatedAt`:
-  ```bash
-  git --no-pager log --since <updatedAt> --name-status --oneline
-  ```
+## Step 1 — Collect update context (run BEFORE any write)
+
+Read `openwiki/.last-update.json` if it exists: `gitHead`, `updatedAt`, `status`.
+
+Run these exact commands (all git invocations use `--no-pager`; git is read-only here):
+
+```bash
+git --no-pager rev-parse HEAD
+git --no-pager status --short --untracked-files=all
+git --no-pager diff --name-only <gitHead>..HEAD   # update with a gitHead only
+```
+
+On **update** with a `gitHead`, also run `git --no-pager log <gitHead>..HEAD
+--max-count=50 --oneline --name-status` for orientation. The changed-paths list is the
+planner's update window: only pages whose systems intersect those paths (plus
+navigation and cross-page consistency) need work. On **init**, or update without prior
+metadata, run `git --no-pager log --max-count=20 --name-status --oneline` for
+orientation instead. History is a discipline, not a prescribed block: read it when it
+helps establish context; skip it when it does not.
 
 If this is not a git repository, degrade gracefully: use filesystem timestamps, source
-inspection, and existing docs to infer what changed (as the system prompt already allows).
+inspection, and existing docs to infer what changed.
 
-Keep the assembled output (labelled `$ git status --short`, etc.) as the **Git context** /
-**Git change summary** block referenced by the user prompt below.
+Keep the assembled output as the **Git change summary** referenced by the planner in
+Step 3.
 
 Then check for an ignore file, which changes three prompt instructions and the git posture:
 
@@ -113,13 +113,35 @@ test -f .openwikiignore && echo active || echo absent
 
 `{OUTPUT_LANGUAGE_INSTRUCTIONS}` is always empty: this port has no `--language` flag.
 
-## Step 2 — Snapshot the wiki (idempotence, run BEFORE the wiki work)
+## Step 2 — Prepare the wiki (migrate + provenance snapshot, run BEFORE the wiki work)
+
+First locate the finalizer. It ships with every install layout, but not always at the same
+path, and the working directory is the *target* repository rather than the install:
 
 ```bash
-find openwiki -type f -not -name .last-update.json -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum
+ls "$CLAUDE_PLUGIN_ROOT/scripts/openwiki-finalize.py" .claude/skills/openwiki/scripts/openwiki-finalize.py .agents/skills/openwiki/scripts/openwiki-finalize.py "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py" scripts/openwiki-finalize.py 2>/dev/null | head -1
 ```
 
-Record this hash. You will recompute it in Step 4.
+`ls` sorts its operands, so with several layouts present the winner is whichever path sorts
+first, not the order listed. Every copy is byte-identical (CI enforces it), so any hit is correct.
+Remember the path it prints; Step 3b uses the same one.
+
+If the `ls` prints nothing, the script is genuinely unavailable: say so in your final message
+and skip both this step and Step 3b. Do not hand-write front matter, indexes, or
+provenance — that is non-deterministic and would break idempotence.
+
+Run prepare mode:
+
+```bash
+python3 <the path from the previous command> --snapshot openwiki
+```
+
+It backfills OKF front matter on pages missing it (tagging its guesses
+`openwiki_generated: true` for a later run to upgrade) and writes
+`.openwiki-run.json` at the repository root: each concept page's body hash plus its
+prior `generated` event. The state file lives outside `openwiki/`, is consumed and
+deleted by Step 3b, and is overwritten by the next run — a crash between the steps is
+self-correcting.
 
 ## Step 3 — System prompt (act as this agent)
 
@@ -434,47 +456,29 @@ Link integrity:
 
 ## Step 3b — Finalize the wiki (deterministic, run AFTER the wiki work)
 
-Upstream does this in harness code (`src/okf/frontmatter.ts`, `src/okf/index-sync.ts`,
-`src/agent/wiki-link-validator.ts`). Here it is one script.
-
-First locate it. It ships with every install layout, but not always at the same path, and
-the working directory is the *target* repository rather than the install:
+Upstream does this in harness code (`src/agent/wiki-finalizer.ts`,
+`src/okf/generated-provenance.ts`, `src/okf/frontmatter.ts`, `src/okf/index-sync.ts`,
+`src/agent/wiki-link-validator.ts`). Here it is one script, in finalize mode:
 
 ```bash
-ls "$CLAUDE_PLUGIN_ROOT/scripts/openwiki-finalize.py" .claude/skills/openwiki/scripts/openwiki-finalize.py .agents/skills/openwiki/scripts/openwiki-finalize.py "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py" scripts/openwiki-finalize.py 2>/dev/null | head -1
+python3 <the Step 2 path> openwiki --actor <the model you are running as>
 ```
 
-`ls` sorts its operands, so with several layouts present the winner is whichever path sorts
-first, not the order listed. Every copy is byte-identical (CI enforces it), so any hit is correct.
-Then run the path it prints, by that absolute path:
+It regenerates every directory `index.md` (the root carries `okf_version: "0.2"`),
+annotates broken internal links, then reconciles generated provenance: pages whose
+body changed this run are stamped `generated: { by: <actor>, at: <now> }` and lose any
+legacy `timestamp`; unchanged pages keep (or are restored to) their prior stamp. It
+deletes `.openwiki-run.json`, always exits 0, and never deletes content.
 
-```bash
-python3 <the path from the previous command> openwiki
-```
+Run it AFTER the wiki work. It is idempotent: a run that changes no page bodies leaves
+every wiki file byte-identical (only `.last-update.json` refreshes in Step 4, by
+design — see below).
 
-It backfills OKF front matter on any page missing it (tagging its guesses
-`openwiki_generated: true` for a later run to upgrade), regenerates every directory `index.md`,
-and annotates broken internal links. It always exits 0 and never deletes content.
+## Step 4 — Persist metadata (run AFTER the wiki work)
 
-Run it BEFORE Step 4 — its writes must land inside the snapshot window, or the hash comparison
-will not see them. It is idempotent, so a genuine no-op run leaves every file byte-identical and
-Step 4 correctly writes nothing.
-
-If the `ls` prints nothing, the script is genuinely unavailable: say so in your final message and
-skip this step. Do not hand-write front matter or indexes — that is non-deterministic and would
-break the no-op contract of Step 4.
-
-## Step 4 — Persist metadata (idempotence, run AFTER the wiki work)
-
-Recompute the snapshot from Step 2:
-
-```bash
-find openwiki -type f -not -name .last-update.json -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum
-```
-
-- If the hash is **unchanged** → no-op. Do not write `.last-update.json`. State that the wiki is already current.
-- If the hash **changed** → write `openwiki/.last-update.json` with exactly these fields
-  (shape from OpenWiki `writeLastUpdateMetadata`):
+Write `openwiki/.last-update.json` with exactly these fields (shape from OpenWiki
+`writeLastUpdateMetadata`; upstream #647: the timestamp always refreshes so freshness
+checks reflect the actual last run — a no-op update still means OpenWiki ran):
 
 ```json
 {
@@ -487,11 +491,13 @@ find openwiki -type f -not -name .last-update.json -print0 2>/dev/null | sort -z
 ```
 
 Get `updatedAt` and `gitHead` from Bash (`date -u +%Y-%m-%dT%H:%M:%S.000Z`, `git rev-parse HEAD`)
-rather than guessing.
+rather than guessing. Write the file on **every** completed run, including no-ops.
 
 `status` is upstream's `UpdateRunStatus` (`complete` | `interrupted`), from
-`src/agent/types.ts`. Write `complete` on a normal finish. If the run is interrupted, leave the
-previous metadata untouched so the next update still diffs from the last known-good state.
+`src/agent/types.ts`. This port always writes `complete`: it cannot reliably persist
+metadata mid-interrupt, so an interrupted run leaves the previous file untouched, and
+the next update re-runs on the dirty `openwiki/` tree — the conservative equivalent of
+upstream's `interrupted` status.
 
 ---
 
@@ -509,7 +515,8 @@ previous metadata untouched so the next update still diffs from the last known-g
 **update:**
 > Update the existing OpenWiki documentation for this repository.
 >
-> Inspect openwiki/, identify recent source changes, and refresh only the documentation pages directly affected by those changes. Use the git evidence below when available. Keep edits surgical: do not rewrite accurate sections, do not update source maps or git evidence just to refresh them, and do not make formatting-only changes. If the wiki is already current, do not edit files. Update openwiki/.last-update.json only when OpenWiki content changes.
+> Inspect openwiki/, identify recent source changes, and refresh only the documentation pages directly affected by those changes. Use the git evidence below when available. Keep edits surgical: do not rewrite accurate sections, do not update source maps or git evidence just to refresh them, and do not make formatting-only changes. If the wiki is already current, do not edit files. openwiki/.last-update.json is rewritten at the
+end of every run, including no-ops (upstream #647).
 >
 > Last update metadata: *(contents of .last-update.json, or "No previous OpenWiki update metadata was found.")*
 >
@@ -557,7 +564,7 @@ the `Edit`/`Write` scoping below it. If that matters more to you than Step 3b, d
 `Bash(python3:*)` and `Bash(ls:*)`; the run then reports the finalizer as unavailable and skips
 the step instead of failing. `Bash(ls:*)` on its own only covers the lookup.
 
-`AGENTS.md` / `CLAUDE.md` are deliberately absent from this allowlist: the `v0.3.3` prompt above
+`AGENTS.md` / `CLAUDE.md` are deliberately absent from this allowlist: the worker prompt above
 already forbids writing them during normal runs, and granting the permission anyway would leave
 enforcement resting solely on the model obeying its own prompt, with no technical backstop. Do
 not add them back.
