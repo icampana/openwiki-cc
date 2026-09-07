@@ -272,12 +272,14 @@ Copy the script under `.claude/hooks/` and wire it in `.claude/settings.json`:
 
 ## Fidelity to upstream
 
-**Tracked against upstream `v0.3.3`, repository output mode.** The reproduced surface is the
-`init` and `update` system prompts (`src/agent/prompts/code.ts` → `CODE_SYSTEM_PROMPTS`), the
-prompt assembly and link-integrity appendix (`src/agent/prompt.ts`), and the git evidence,
-no-op, snapshot and metadata logic (`src/agent/utils.ts`). Prompt text is extracted from upstream
-with [`scripts/extract-upstream-prompt.py`](scripts/extract-upstream-prompt.py) rather than
-retyped, so transcription drift is not possible.
+**Tracked against upstream `v0.5.0`, repository output mode.** The reproduced surface is the
+repository planner and per-page worker prompts (`src/agent/repository-prompts.ts`), the run
+lifecycle (`src/agent/index.ts`), the prepare/finalize harness (`src/agent/wiki-finalizer.ts`),
+link validation (`src/agent/wiki-link-validator.ts`), the git evidence, no-op, and metadata
+logic (`src/agent/utils.ts`), and the OKF machinery (`src/okf/frontmatter.ts`,
+`src/okf/index-sync.ts`, `src/okf/generated-provenance.ts`). Prompt text is extracted from
+upstream with [`scripts/extract-upstream-prompt.py`](scripts/extract-upstream-prompt.py)
+rather than retyped, so transcription drift is not possible.
 
 **Deliberately not covered**, and recorded as such in
 [`upstream.lock.json`](upstream.lock.json):
@@ -288,27 +290,34 @@ retyped, so transcription drift is not possible.
 | `CODE_SYSTEM_PROMPTS.chat` | Interactive chat. This port auto-routes between `init` and `update`; a plugin slash command is always namespaced. |
 | `--language` | No slash-command equivalent, so `language` is omitted from run metadata rather than faked. |
 | `translation-middleware.ts`, `skills.ts`, `crash-guard.ts`, `vertex-surface.ts`, `openai-chatgpt-oauth.ts` | Harness plumbing the host already provides. |
+| `src/claims/*`, `src/okf/claim-sources.ts`, `src/okf/claims-verification.ts` | Grounded claims with machine verification. A prompt-only port cannot provide a claims store or evidence resolvers, so workers write pages directly. |
+| `src/generation/*` | Durable resumable page jobs. The port runs in one session; update planning uses the last recorded `gitHead` as its only window. |
+| `src/mermaid/*` | Mermaid fence parse-validation. Python's standard library cannot parse mermaid, and the v0.5.0 repository prompts carry no diagram discipline to lose. |
+| `src/integrations/*` | Upstream's own coding-agent installer. This port *is* the alternative distribution. |
 
-**Outstanding.** Upstream's named subagents — `src/agent/skeleton_critic.ts`,
-`src/agent/wiki_qa_subagents.ts` (`wiki_question_finder`, `wiki_answer_verifier`) — were redirected
-to generic subagent briefs in this port rather than ported verbatim, because their actual system
-prompts live in upstream harness code that was not extracted here. Porting those prompts is
-tracked work, listed so it stays visible instead of silently missing. `src/agent/wiki-link-validator.ts`
-and the OKF work under `src/okf/` (`frontmatter.ts`, `index-sync.ts`, `index-labels.ts`), by
-contrast, are reproduced.
+**Removed upstream, removed here.** The `skeleton_critic.ts` and `wiki_qa_subagents.ts`
+subsystems that the v0.3.3 port adapted into critic/verifier subagent waves were deleted
+upstream in v0.5.0 along with the monolithic prompt. The per-page worker model replaces
+them; `src/agent/wiki-link-validator.ts`, previously reproduced but untracked, is now
+tracked in [`upstream.lock.json`](upstream.lock.json).
 
 ### OKF front matter
 
-From `v0.3.3`, every generated page carries YAML front matter following the Google Knowledge
-Catalog OKF v0.1 schema — `type` is required, `title` and `description` are recommended, and
+From `v0.5.0`, every generated page carries YAML front matter following the Google Knowledge
+Catalog OKF v0.2 schema — `type` is required, `title` and `description` are recommended, and
 producer-defined extension fields are valid and preserved across runs. `index.md`, `log.md`,
-`_plan.md`, and `_sidebar.md` are reserved and never receive it — `_sidebar.md` is a Docsify
-navigation partial, so front matter injected there renders as navigation, not metadata.
+`INSTRUCTIONS.md`, `_plan.md`, and `_sidebar.md` are reserved and never receive it.
+
+After every run the finalizer stamps each page whose **body** changed with
+`generated: { by: <model>, at: <timestamp> }` and removes the superseded legacy `timestamp`
+field; pages whose body did not change keep their prior stamp. The stamp is code-owned:
+workers must not author or edit it, and the finalizer restores it if a run tampers with it.
 
 If you already have an `openwiki/` from an earlier version, no migration step is needed. Front
 matter is additive, and [`scripts/openwiki-finalize.py`](scripts/openwiki-finalize.py) backfills
-it on the next run, tagging anything it inferred with `openwiki_generated: true` so a later run
-can replace the guess with a real description. Nothing is deleted.
+it on the next run (prepare mode, Step 2 of the command), tagging anything it inferred with
+`openwiki_generated: true` so a later run can replace the guess with a real description.
+Nothing is deleted.
 
 Two notes if you are upgrading a wiki that already exists:
 
@@ -373,8 +382,8 @@ hooks/
   test_gate.sh       # self-check for the gate
 scripts/
   check-upstream-drift.sh  # re-hashes the upstream files this port reproduces
-  extract-upstream-prompt.py  # pulls prompt text from upstream, verbatim
-  openwiki-finalize.py     # Step 3b: OKF front matter, indexes, link integrity
+  extract-upstream-prompt.py  # pulls planner/worker prompt text from upstream, verbatim
+  openwiki-finalize.py     # Step 2 --snapshot (migrate + body-hash state), Step 3b finalize (indexes, links, generated provenance)
   test_finalize.py         # finalizer test suite
 upstream.lock.json   # the upstream ref + per-file SHA-256 the port is ported from
 .github/workflows/
