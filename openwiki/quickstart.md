@@ -3,6 +3,7 @@ type: Entrypoint
 title: openwiki-cc — quickstart
 description: Entry point to the openwiki-cc wiki — a native Claude Code, Codex, and opencode port of langchain-ai/openwiki that generates and maintains an openwiki/ documentation wiki for a target repository.
 tags: [openwiki-cc, agent-port]
+generated: { by: muse-spark, at: 2026-09-07T23:24:26Z }
 ---
 
 # openwiki-cc — quickstart
@@ -23,30 +24,32 @@ deliverable is the agent definition itself, expressed as prompt files.
 
 | Path | Role |
 |---|---|
-| [`commands/wiki.md`](../commands/wiki.md) | The Claude Code slash command → `/openwiki:wiki`. Contains the full routing, the four run steps, and the verbatim upstream system prompt. **This is the canonical agent definition.** |
-| [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) | The same agent for the shell-based hosts — **Codex** (`$openwiki`) and **opencode**, which both discover `.agents/skills/`. Same system prompt; the subagent section is marked opencode-only. |
+| [`commands/wiki.md`](../commands/wiki.md) | The Claude Code slash command → `/openwiki:wiki`. Contains the full routing, the six-step lifecycle (Steps 0, 1, 2, 3, 3b, 4), and the verbatim upstream planner + per-page-worker prompts. **This is the canonical agent definition.** |
+| [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) | The same agent for the shell-based hosts — **Codex** (`$openwiki`) and **opencode**, which both discover `.agents/skills/`. Same planner/worker prompts and lifecycle; the per-page-worker dispatch section is host-conditional (one subagent per page where the host has a subagent tool, sequential writing under the same worker discipline on Codex). |
 | [`.opencode/commands/wiki.md`](../.opencode/commands/wiki.md) | opencode's `/wiki`. Mode routing from `$ARGUMENTS` only — it delegates to the skill rather than restating the prompt. |
 | [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json), [`marketplace.json`](../.claude-plugin/marketplace.json) | Packaging so Claude Code can install the command as a plugin from a marketplace. |
 | [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh) | Optional shell gate for auto-running the wiki from a Claude Code `Stop`/`SessionEnd` hook — spawns the frontier model only when source actually changed. |
 | [`hooks/test_gate.sh`](../hooks/test_gate.sh) | Self-check for the gate's skip/run decisions. |
 | [`upstream.lock.json`](../upstream.lock.json) | The upstream ref this port was ported from, plus a SHA-256 per reproduced file. |
 | [`scripts/check-upstream-drift.sh`](../scripts/check-upstream-drift.sh) | Re-hashes those files against the latest upstream release. |
-| [`scripts/extract-upstream-prompt.py`](../scripts/extract-upstream-prompt.py) | Pulls the `init`/`update` system prompt text straight out of upstream's `src/agent/prompts/code.ts` for reproduction in `commands/wiki.md` / `SKILL.md`, so the prompt is never hand-retyped. |
-| [`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) | Step 3b of a run: deterministically backfills OKF front matter, regenerates directory `index.md` files, and annotates broken internal links. Idempotent and never deletes content; tested by `scripts/test_finalize.py`. |
+| [`scripts/extract-upstream-prompt.py`](../scripts/extract-upstream-prompt.py) | Pulls the planner/worker prompt text straight out of upstream's `src/agent/repository-prompts.ts` for reproduction in `commands/wiki.md` / `SKILL.md`, so the prompt is never hand-retyped. |
+| [`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) | Step 2 `--snapshot` (migrate + body-hash state) and Step 3b finalize (indexes, link validation, `generated` provenance) of a run. Idempotent and never deletes content; tested by `scripts/test_finalize.py`. |
 | [`.github/workflows/upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | Runs that check weekly and keeps one issue in sync with the report. |
 | [`README.md`](../README.md) | Human-facing install + usage guide. |
 
 The single source of truth for the agent's behavior is `commands/wiki.md`; the Codex `SKILL.md`
 tracks it with host-specific adaptations. When they disagree, `commands/wiki.md` is authoritative.
 
-> **This port is tracked against upstream `v0.3.3`, repository output mode.** The `init`/`update`
-> system prompts are extracted programmatically from `src/agent/prompts/code.ts` with
+> **This port is tracked against upstream `v0.5.0`, repository output mode.** The planner
+> and per-page-worker prompts are extracted programmatically from
+> `src/agent/repository-prompts.ts` with
 > [`scripts/extract-upstream-prompt.py`](../scripts/extract-upstream-prompt.py) rather than
 > retyped, so transcription drift is not possible. See
 > [Detecting drift](architecture.md#detecting-upstream-drift) for how future upstream moves are
 > tracked and [Fidelity to upstream](../README.md#fidelity-to-upstream) for the per-file detail,
-> including what upstream ships that this port deliberately does not (personal output mode, the
-> chat prompt, `--language`) and what remains outstanding (the critic/verifier subagent prompts).
+> including what upstream ships that this port deliberately does not (the claims subsystem,
+> durable resumable page jobs, mermaid parse-validation, upstream's own installer, personal
+> output mode, the chat prompt, `--language`).
 
 ## Install & run
 
@@ -95,8 +98,8 @@ Documentation quality depends directly on the model — a small/fast tier produc
 ## Where to go next
 
 - **[architecture.md](architecture.md)** — how a run executes end-to-end: the two host ports, the
-  routing + four-step lifecycle (git evidence → snapshot → system prompt → metadata), idempotence,
-  parallel subagents, root-file wiring, and the hook-based auto-run with its shell gate.
+  routing + six-step lifecycle (no-op check → git evidence → snapshot → planner/workers →
+  finalize → metadata), idempotence, per-page workers, root-file wiring, and the hook-based auto-run with its shell gate.
 - **[Fidelity to upstream](../README.md#fidelity-to-upstream)** — what is verbatim from OpenWiki's
   source vs adapted for these harnesses, and why.
 

@@ -3,6 +3,7 @@ type: Architecture Overview
 title: Architecture — how a run executes
 description: The execution contract behind an openwiki-cc run — mode routing, the git-evidence/snapshot/system-prompt/finalize/metadata lifecycle, idempotence, root-agent-file behavior, and upstream drift detection.
 tags: [openwiki-cc, agent-port]
+generated: { by: muse-spark, at: 2026-09-07T23:24:26Z }
 ---
 
 # Architecture — how a run executes
@@ -23,17 +24,22 @@ command for slash arguments, which holds no agent logic.
 |---|---|---|---|
 | Trigger | `/openwiki:wiki [init\|update] [instruction]` | `/wiki [init\|update] [instruction]`, or ask in natural language | `$openwiki` (or natural-language "update the openwiki docs") |
 | Mode input | explicit token, else auto-route | explicit token via `$ARGUMENTS`, else auto-route | phrasing, else `openwiki/` auto-detect (no slash args) |
-| Big-repo strategy | fans out read-only **subagents** (Task tool), each own context window | same — opencode has a Task tool | **native context compaction** (no subagent tool) |
+| Page writing | one **subagent per planned page** (Task tool), each own context window | same — opencode has a subagent tool | orchestrator writes pages one at a time under the same worker discipline (no subagent tool) |
 | Filesystem | native Read/Write/Edit/Glob/Grep/Bash on real repo paths | host-native shell + edit tools | same, `apply_patch` for writes |
 
 `commands/wiki.md` is authoritative; when it and `SKILL.md` disagree, the command wins. Both
-reproduce OpenWiki's system prompt **verbatim from upstream source** (not from memory), with only
-two harness adaptations, marked `[adapted]` inline: (a) DeepAgents' virtual filesystem → the host's
-native file tools on real paths; (b) DeepAgents' "task tool" → the host's subagent tool.
+reproduce OpenWiki `v0.5.0`'s planner + per-page-worker prompts **verbatim from upstream
+source** (not from memory), with harness adaptations marked `[adapted]` inline: (a) DeepAgents'
+virtual filesystem → the host's native file tools on real paths; (b) upstream's durable
+page-job queue → the plan held in orchestrator context plus one host subagent per page
+(sequential writing on hosts without a subagent tool); (c) upstream's prepare/finalize
+harness → Step 2's `--snapshot` and Step 3b; (d) the claims subsystem is out of scope —
+workers write pages directly, with no submission tool, inspection tool, or claims guidance.
 
 That second adaptation is the **only** place the hosts genuinely diverge. Rather than fork the
-skill per host, its subagent section is marked opencode-only — opencode follows it, Codex skips it.
-Keeping one file avoids a third copy of a ~300-line prompt drifting out of sync.
+skill per host, its dispatch paragraph is host-conditional — subagent dispatch where the tool
+exists, sequential writing on Codex. The prompt text is identical either way. Keeping one file
+avoids a third copy of the prompt drifting out of sync.
 
 ## Mode routing
 
@@ -49,89 +55,108 @@ The mode is resolved before any work:
 Auto-route replaces upstream's interactive-chat default — a plugin slash command is always
 namespaced and can't be a bare conversational `/openwiki`.
 
-## The run lifecycle (Claude Code, four steps)
+## The run lifecycle (Claude Code, six steps)
 
 `commands/wiki.md` drives the model through a fixed sequence. `SKILL.md` mirrors it for Codex.
 
 **Step 0 — pre-run no-op check** *(update mode only, and only when no extra instruction was
-given)*. Mirrors upstream `getUpdateNoopStatus` / `shouldCheckUpdateNoop`: skip the entire run
-when nothing relevant changed. Read `openwiki/.last-update.json`; if it has a `gitHead`, the run
-is skipped when **both** hold:
+given)*. Mirrors upstream `v0.5.0` `getUpdateNoopStatus` / `shouldCheckUpdateNoop`: skip the
+model work when nothing relevant changed. Read `openwiki/.last-update.json`; if it has a
+`gitHead`, the run is skipped when **both** hold:
 - `git status --short` is empty after ignoring any line for `openwiki/.last-update.json`; **and**
 - `HEAD == gitHead`, **or** every path in `gitHead..HEAD` is under `openwiki/`.
 
-With no recorded `gitHead`, this check is skipped and the run proceeds.
+With no recorded `gitHead`, this check is skipped and the run proceeds. When the check skips,
+the run still refreshes `updatedAt` in `.last-update.json` (upstream #647 — a no-op update
+still means OpenWiki ran) so freshness checks reflect the actual last run.
 
-**Step 1 — collect git evidence** (before any write; all `git --no-pager`, all read-only). Always
-runs `status --short`, `rev-parse HEAD`, `diff --name-status HEAD`. History depends on mode:
-init (or update with no metadata) → `log --max-count=20`; update with a `gitHead` →
-`log gitHead..HEAD`; update with only an `updatedAt` → `log --since <updatedAt>`. Not a git repo →
-degrade to filesystem timestamps + source inspection. The assembled output is the "git evidence"
-block fed to the system prompt.
+**Step 1 — collect update context** (before any write; all `git --no-pager`, all read-only).
+Always `rev-parse HEAD` and `status --short`. On update with a `gitHead`, also
+`diff --name-only gitHead..HEAD` plus `log gitHead..HEAD` for orientation — the changed-paths
+list is the planner's update window. On init, or update without prior metadata,
+`log --max-count=20` instead. History is a discipline, not a prescribed block. A
+`.openwikiignore` check selects the git-history/discovery prompt variants and sets the read
+boundary for the whole run.
 
-**Step 2 — snapshot** the current wiki content for idempotence:
+**Step 2 — prepare the wiki** (migrate + provenance snapshot, before any writing):
 ```bash
-find openwiki -type f -not -name .last-update.json -print0 | sort -z | xargs -0 sha256sum | sha256sum
+python3 <finalizer> --snapshot openwiki
 ```
+Backfills OKF front matter on pages missing it (tagging inferred fields
+`openwiki_generated: true` for a later run to upgrade) and writes `.openwiki-run.json` at
+the repository root: each concept page's body hash (SHA-256 of the body excluding front
+matter) plus its prior `generated` event. The state file lives outside `openwiki/`, is
+consumed and deleted by Step 3b, and is overwritten by the next run — a crash between the
+steps self-corrects.
 
-**Step 3 — act as the agent.** The model runs OpenWiki's `v0.3.3` repository-output-mode system
-prompt (reproduced verbatim by [`scripts/extract-upstream-prompt.py`](../scripts/extract-upstream-prompt.py),
-not retyped) against the evidence: inventory the repo (tree, config, entrypoints, representative
-files per domain — never `glob **/*` from root, never read every file), write a temporary
-`openwiki/_plan.md`, then write `quickstart.md` + section pages. Discipline baked into the prompt:
-no stub pages, no single-file directories unless the boundary is real, each concept gets one
-canonical home. Every generated page carries OKF v0.1 YAML front matter (`type` required); `index.md`,
-`log.md`, `_plan.md`, and `_sidebar.md` are reserved and never get concept front matter
-(`_sidebar.md` is a Docsify navigation partial, not a document). Update mode is surgical — edit only
-what changed evidence affects, no formatting-only churn, and no-op allowed. `_plan.md` is deleted
-before the run ends.
+**Step 3 — plan, then write pages.** The orchestrator first acts as the **planner**
+(upstream `createRepositoryPlannerPrompt`): explore the repo, design the smallest complete
+information architecture (hierarchical paths, `relatedPages` for navigation, quickstart
+required on init, `pages: []` allowed when an update needs nothing), and hold the plan —
+path, title, purpose, seedPaths, relatedPages, instructions per page — in context. Then one
+**page worker** per planned page (upstream `createRepositoryPagePrompt`), each briefed with
+its plan entry: update workers read the current page first and change only what repository
+evidence requires; every worker writes exactly one page and owns nothing else.
+
+Every page MUST begin with valid OKF v0.2 concept front matter (`type` required; `title`,
+`description`, `tags` recommended). Workers must not author `generated`, `verified`,
+`sources`, `timestamp`, or OpenWiki control fields — OpenWiki owns those. The skeleton-critic
+and QA-verifier subagent waves of the old v0.3.3 port are gone: upstream deleted both
+subsystems in v0.5.0, and the per-page worker model replaces them. There is no diagram
+discipline in the repository prompts. The broken-link repair loop is the port's own
+`[adapted]` addition: a worker that finds an `openwiki: broken internal link` comment repairs
+the href or restores the target, then deletes the comment.
 
 **Step 3b — finalize (deterministic, no model involved).** Runs
-[`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) — located first by an `ls` over
-every install layout (plugin root via `$CLAUDE_PLUGIN_ROOT`, project- and user-scoped skill
-directories, repository checkout), because the working directory during a run is the *target*
-repository, not the install. Three passes reproducing
-upstream `src/okf/frontmatter.ts`, `src/okf/index-sync.ts`, and `src/agent/wiki-link-validator.ts`:
-backfill OKF front matter on any page missing it (tagging inferred fields
-`openwiki_generated: true` for a later run to upgrade with real content), regenerate every
-directory `index.md` deterministically, and annotate broken internal links with an HTML comment
-rather than deleting anything. It always exits 0. This step **must** run before Step 4: its writes
-have to land inside the Step 2/Step 4 snapshot window, or the hash comparison never sees them and
-a genuinely no-op documentation run would still leave stale front matter or dangling links
-unrepaired. It is idempotent by contract — rerunning it against output it already produced makes
-zero changes — otherwise a no-op `update` would still rewrite `.last-update.json` and defeat the
+[`scripts/openwiki-finalize.py`](../scripts/openwiki-finalize.py) in finalize mode:
+```bash
+python3 <the Step 2 path> openwiki --actor <the model you are running as>
+```
+Regenerates every directory `index.md` (the root carries `okf_version: "0.2"`), annotates
+broken internal links with an HTML comment rather than deleting anything, then reconciles
+**generated provenance**: pages whose body changed this run are stamped
+`generated: { by: <actor>, at: <now> }` and lose any legacy `timestamp`; unchanged pages keep
+(or are restored to) their prior stamp. It deletes `.openwiki-run.json`, always exits 0, and
+never deletes content. It is idempotent by contract — a run that changes no page bodies leaves
+every wiki file byte-identical — otherwise a no-op `update` would churn files and defeat the
 gate described below.
 
-**Step 4 — persist metadata.** Recompute the Step 2 hash (after Step 3b has run). If
-**unchanged** → no-op, do not write metadata, report the wiki is already current. If **changed** →
-write `openwiki/.last-update.json`:
+**Step 4 — persist metadata.** Write `openwiki/.last-update.json` on **every** completed run,
+including no-ops (upstream #647):
 ```json
-{ "updatedAt": "<ISO 8601>", "command": "init|update", "gitHead": "<git rev-parse HEAD>", "model": "<model id>", "status": "complete|interrupted" }
+{ "updatedAt": "<ISO 8601>", "command": "init|update", "gitHead": "<git rev-parse HEAD>", "model": "<model id>", "status": "complete" }
 ```
-`status` is written `"complete"` on a normal finish; on an interrupted run, the previous metadata
-is left untouched instead so the next update still diffs from the last known-good state.
+`status` is upstream's `UpdateRunStatus` (`complete` | `interrupted`). This port always writes
+`complete`: it cannot persist metadata mid-interrupt, so an interrupted run leaves the previous
+file untouched and the next update re-runs on the dirty tree — the conservative equivalent of
+`interrupted`.
 
 ## Idempotence & state
 
 Two independent mechanisms keep re-runs cheap and honest:
 
-- **Content hash (Steps 2/4)** — the SHA-256 of wiki content decides whether a run *changed*
-  anything. Nothing changed → `.last-update.json` is not even rewritten.
+- **Body-hash snapshot (Steps 2/3b)** — each page's SHA-256 decides whether its `generated`
+  stamp advances. Unchanged bodies keep (or are restored to) their prior stamp, so a second
+  consecutive full run leaves every wiki file byte-identical. Only `.last-update.json`
+  refreshes its timestamp on a no-op, by design — and the tree hash the gate cares about
+  excludes it.
 - **`gitHead` in `.last-update.json`** — the commit the *next* `update` diffs against. This single
   file replaces upstream OpenWiki's SQLite checkpointer; durable crash-resume is intentionally
-  dropped as unnecessary on these hosts.
+  dropped as unnecessary on these hosts. The single update window (changed paths since
+  `gitHead`) replaces upstream's per-page committed baselines.
 
 ## Root agent-file wiring
 
-As of `v0.3.3`, upstream **reversed** this behavior from earlier versions: a run does **not**
-create or update the repo's top-level `/AGENTS.md` or `/CLAUDE.md`. `commands/wiki.md`'s Step 3
-system prompt says so explicitly ("Do not create or update repository `/AGENTS.md` or `/CLAUDE.md`
-files during normal code wiki runs"), and the headless-permissions allowlist at the bottom of
-`commands/wiki.md` deliberately omits `Write`/`Edit` grants for either file — enforcement doesn't
-rest solely on the model obeying its own prompt. If a repository's agent instructions already
-reference OpenWiki, a run keeps those references accurate but does not edit them unless explicitly
-asked. `openwiki/INSTRUCTIONS.md`, when present, is treated the same way: read for scope and
-priorities, never rewritten as part of routine init/update runs.
+Upstream v0.5.0 repository prompts carry no security section — upstream enforces this in
+harness tooling the port does not have — so the port retains its own `[adapted]` line: a run
+does **not** read secrets (`.env`, keys, credentials) and does **not** create or edit agent
+instruction files (`AGENTS.md`, `CLAUDE.md`). The headless-permissions allowlist at the bottom
+of `commands/wiki.md` deliberately omits `Write`/`Edit` grants for either file — enforcement
+doesn't rest solely on the model obeying its own prompt. If a repository's agent instructions
+already reference OpenWiki, a run keeps those references accurate but does not edit them unless
+explicitly asked. `openwiki/INSTRUCTIONS.md`, when present, is treated the same way: read for
+scope and priorities, never rewritten as part of routine init/update runs — and reserved from
+concept front matter, index entries, and provenance like `index.md` and `log.md`.
 
 ## Auto-run via a Stop/SessionEnd hook
 
@@ -158,18 +183,20 @@ The wiki's own idempotence (above) answers "did *this* repo change?". A second, 
 answers "did *upstream* change?" — and it exists because nothing here can answer it otherwise.
 
 This port reproduces a slice of `langchain-ai/openwiki` as **prose inside prompt files**. There is
-no import, no lockfile entry, no dependency edge of any kind. Upstream can rewrite the system
+no import, no lockfile entry, no dependency edge of any kind. Upstream can rewrite the planner
 prompt and every check in this repo still passes — that gap is exactly how the port spent six
 weeks tracking upstream `0.0.4` while upstream had already moved to `v0.3.3` before the OW-3
-re-port closed it.
+re-port closed it, and how the OW-6 re-port closed the next gap to `v0.5.0`.
 
 So the drift is polled instead:
 
-- [`upstream.lock.json`](../upstream.lock.json) pins `trackedRef` (now `v0.3.3`, the ref this port
+- [`upstream.lock.json`](../upstream.lock.json) pins `trackedRef` (now `v0.5.0`, the ref this port
   was re-ported from) and, per reproduced file, a SHA-256 plus a `why` note naming what in this
-  repo depends on it. Tracked today: `src/agent/index.ts`, `src/agent/prompt.ts`,
-  `src/agent/prompts/code.ts`, `src/agent/utils.ts`, `src/okf/frontmatter.ts`,
-  `src/okf/index-sync.ts` — the last two backing `scripts/openwiki-finalize.py`'s Step 3b passes.
+  repo depends on it. Tracked today: `src/agent/index.ts`, `src/agent/repository-prompts.ts`,
+  `src/agent/utils.ts`, `src/agent/wiki-finalizer.ts`, `src/agent/wiki-link-validator.ts`,
+  `src/okf/frontmatter.ts`, `src/okf/generated-provenance.ts`, `src/okf/index-sync.ts` — the
+  last five backing `scripts/openwiki-finalize.py`'s snapshot/finalize modes, the first three
+  backing the lifecycle and the planner/worker prompts.
 - [`scripts/check-upstream-drift.sh`](../scripts/check-upstream-drift.sh) resolves the latest
   upstream release, re-hashes each tracked file at that ref, and diffs against the lock. Exit `0`
   clean, `1` drift, `2` the check itself is broken (missing `jq`, unreachable API, bad `--ref`) —
@@ -182,8 +209,9 @@ So the drift is polled instead:
 
 A file recorded as `GONE` would mean it does not exist at `trackedRef` — the lock's way of saying
 "upstream has this and the port does not cover it yet". None of the currently tracked files are in
-that state; what upstream ships and this port still doesn't cover (personal output mode, the chat
-prompt, `--language`, the critic/verifier subagent prompts) is recorded instead in
+that state; what upstream ships and this port still doesn't cover (the claims subsystem, durable
+resumable page jobs, mermaid parse-validation, upstream's own installer, personal output mode,
+the chat prompt, `--language`) is recorded instead in
 `upstream.lock.json`'s `notCovered` map and in [Fidelity to upstream](../README.md#fidelity-to-upstream).
 
 **Two traps worth keeping.** Never hash a file body captured through `$(...)` — command
@@ -197,7 +225,7 @@ running it without doing the porting work converts a true alarm into a false all
 ## Headless / CI permissions
 
 For non-interactive runs (`claude -p`) without permission prompts, grant a minimal allowlist in
-`.claude/settings.json`: read-only git + `find`/`sha256sum`/`rg`/`date`, with `Write`/`Edit`
-scoped to `openwiki/**`, `CLAUDE.md`, `AGENTS.md` only. The exact snippet lives at the bottom of
-[`commands/wiki.md`](../commands/wiki.md) — it is the OpenWiki `ShellAllowList` expressed as
+`.claude/settings.json`: read-only git + `find`/`rg`/`date`/`ls`/`python3` (for the Step 2/3b
+finalizer lookup and runs), with `Write`/`Edit` scoped to `openwiki/**` only. The exact snippet
+lives at the bottom of [`commands/wiki.md`](../commands/wiki.md) — it is the OpenWiki `ShellAllowList` expressed as
 Claude Code permissions.

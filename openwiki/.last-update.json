@@ -1,7 +1,7 @@
 {
-  "updatedAt": "2026-08-24T12:12:10.000Z",
+  "updatedAt": "2026-09-07T23:24:40.000Z",
   "command": "update",
-  "gitHead": "5d7f121f07b7d0f1bc4c7996764db3f69c9466e5",
-  "model": "claude-sonnet-5",
+  "gitHead": "57376d3a50b082efaf52e52b39a976bb38218426",
+  "model": "muse-spark",
   "status": "complete"
 }
