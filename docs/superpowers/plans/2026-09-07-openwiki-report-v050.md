@@ -862,7 +862,7 @@ Note: default mode **no longer runs `pass_frontmatter`** — migration moved to 
 - [ ] **Step 4: Run the full suite**
 
 Run: `python3 scripts/test_finalize.py`
-Expected: PASS. Count: 65 (Task 4) + 5 new pass tests, minus the rewritten idempotence tests (same count: 3 replaced by 3) = **70 total**.
+Expected: PASS. Count: 65 (Task 4) + 4 new pass tests, with the rewritten idempotence tests holding the same count (3 replaced by 3) = **69 total**.
 
 - [ ] **Step 5: Refresh the shipped twin and commit**
 
@@ -1148,7 +1148,7 @@ Replace the `> Reproduced from OpenWiki v0.3.3 ...` attribution (4 lines) with:
 > orchestrator context plus one host subagent per page (sequential writing on hosts
 > without a subagent tool); (c) upstream's prepare/finalize harness → Step 2's
 > `--snapshot` and Step 3b; (d) the claims subsystem is out of scope — workers write
-> pages directly, no `submit_page` / `inspect_claims` / claims guidance.
+> pages directly, with no submission tool, inspection tool, or claims guidance.
 ```
 
 - [ ] **Step 3: Write Phase 1 (planning) from the planner prompt**
@@ -1442,7 +1442,7 @@ python3 scripts/test_finalize.py
 sh hooks/test_gate.sh
 GITHUB_TOKEN=$(gh auth token) sh scripts/check-upstream-drift.sh; echo "drift EXIT=$?"
 ```
-Expected: 70 finalizer tests pass, all 7 gate scenarios pass, drift exits 0.
+Expected: 69 finalizer tests pass, all 7 gate scenarios pass, drift exits 0.
 
 - [ ] **Step 2: Run the real command against this repo**
 
