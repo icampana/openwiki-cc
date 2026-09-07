@@ -1266,8 +1266,8 @@ for phrase in "You own exactly" "Write only" "Do not author generated, verified,
   "The complete planned page map is" "Init MUST include /openwiki/quickstart.md" \
   "openwiki: broken internal link" "openwiki_generated" "--snapshot" "--actor"; do
   printf 'cmd=%s skill=%s  %s\n' \
-    "$(grep -cF "$phrase" commands/wiki.md)" \
-    "$(grep -cF "$phrase" .agents/skills/openwiki/SKILL.md)" "$phrase"
+    "$(grep -cF -- "$phrase" commands/wiki.md)" \
+    "$(grep -cF -- "$phrase" .agents/skills/openwiki/SKILL.md)" "$phrase"
 done
 diff <(grep -o '\${[a-zA-Z_]*}' commands/wiki.md | sort -u) \
      <(grep -o '\${[a-zA-Z_]*}' .agents/skills/openwiki/SKILL.md | sort -u) \
