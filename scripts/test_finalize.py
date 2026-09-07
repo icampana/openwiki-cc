@@ -949,6 +949,16 @@ class TestProvenancePass(TempWiki):
         self.assertIn("generated: { by: m, at:", p.read_text(encoding="utf-8"))
         self.assertTrue(changed)
 
+    def test_changed_page_without_any_frontmatter_gets_type_and_stamp(self):
+        p = self.write("bare.md", "# Bare\n\nProse.\n")
+        finalize.pass_provenance(
+            self.wiki, "m", "2026-09-07T12:00:00Z", finalize.state_path_for(self.wiki))
+        out = p.read_text(encoding="utf-8")
+        fields = finalize.parse_fields(finalize.split_frontmatter(out)[0])
+        self.assertEqual(fields["type"], "Reference")
+        self.assertIn("generated: { by: m, at:", out)
+        self.assertEqual(fields["openwiki_generated"], "true")
+
 
 class TestShippedCopy(unittest.TestCase):
     def test_skill_ships_an_identical_finalizer(self):

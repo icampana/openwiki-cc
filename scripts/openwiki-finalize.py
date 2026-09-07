@@ -732,6 +732,8 @@ def pass_provenance(wiki, actor, at, state_path):
         prior = entries.get(rel) if entries is not None else None
         body_changed = prior is None or prior.get("bodyHash") != body_hash(text)
         if body_changed:
+            if split_frontmatter(text)[0] is None:
+                text = ensure_frontmatter(text, path.stem.replace("-", " ").title())
             candidate = canonicalize_terminal(
                 remove_field(set_generated_event(text, actor, at), "timestamp"))
         else:
