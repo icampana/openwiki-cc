@@ -99,6 +99,16 @@ class TestFrontmatter(TempWiki):
         finalize.pass_frontmatter(self.wiki)
         self.assertNotIn("type:", sidebar.read_text(encoding="utf-8"))
 
+    def test_instructions_md_is_never_a_concept(self):
+        p = self.write("INSTRUCTIONS.md", "# Instructions\n\nDo not touch.\n")
+        self.write("quickstart.md", "# Quickstart\n\nStart.\n")
+        finalize.pass_frontmatter(self.wiki)
+        finalize.pass_indexes(self.wiki)
+        self.assertNotIn("type:", p.read_text(encoding="utf-8"))
+        index = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertNotIn("INSTRUCTIONS.md", index)
+        self.assertNotIn("Instructions", index)
+
     def test_crlf_frontmatter_is_byte_identical(self):
         """A valid CRLF file should not be modified."""
         original = "---\r\ntype: Playbook\r\ntitle: Kept\r\n---\r\n\r\n# Kept\r\n\r\nBody.\r\n"
@@ -140,7 +150,7 @@ class TestIndexes(TempWiki):
         self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
         finalize.pass_indexes(self.wiki)
         out = (self.wiki / "index.md").read_text(encoding="utf-8")
-        self.assertTrue(out.startswith('---\nokf_version: "0.1"\n---\n'))
+        self.assertTrue(out.startswith('---\nokf_version: "0.2"\n---\n'))
         self.assertIn("- [Quickstart](quickstart.md)", out)
 
     def test_subdirectory_index_has_no_frontmatter(self):

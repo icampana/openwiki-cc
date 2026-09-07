@@ -20,7 +20,10 @@ import re
 import sys
 import urllib.parse
 
-RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md"}
+# Upstream EXCLUDED_FILES at v0.5.0 is {index.md, log.md, INSTRUCTIONS.md}.
+# _plan.md stays as legacy defense (this port's earlier versions wrote one);
+# _sidebar.md stays (OW-5: Docsify nav partial).
+RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md", "INSTRUCTIONS.md"}
 GENERATED_FIELD = "openwiki_generated"
 FALLBACK_TYPE = "Reference"
 
@@ -228,7 +231,7 @@ def pass_frontmatter(wiki):
     return changed
 
 
-ROOT_INDEX_FRONTMATTER = '---\nokf_version: "0.1"\n---\n\n'
+ROOT_INDEX_FRONTMATTER = '---\nokf_version: "0.2"\n---\n\n'
 
 
 def index_label(path):
