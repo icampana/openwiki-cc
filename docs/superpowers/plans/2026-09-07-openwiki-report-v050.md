@@ -306,7 +306,7 @@ Append a `TestSnapshot` class to `scripts/test_finalize.py` (before the `__main_
 ```python
 class TestSnapshot(TempWiki):
     def state_path(self):
-        return self.tmp / "openwiki-run.json"
+        return self.tmp / ".openwiki-run.json"
 
     def test_snapshot_records_body_hash_excluding_frontmatter(self):
         import hashlib
