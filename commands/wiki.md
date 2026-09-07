@@ -55,10 +55,17 @@ If skipped: refresh the run timestamp so freshness checks reflect the actual las
 no repository changes since `<gitHead>`", and stop. Refresh with:
 
 ```bash
-ts=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
-jq --arg t "$ts" '.updatedAt = $t' openwiki/.last-update.json > openwiki/.last-update.json.tmp \
-  && mv openwiki/.last-update.json.tmp openwiki/.last-update.json
+python3 - <<'PY'
+import datetime, json
+p = "openwiki/.last-update.json"
+d = json.load(open(p))
+d["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+with open(p, "w", encoding="utf-8") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+PY
 ```
+(`python3` is used instead of `jq` so the refresh works under the headless allowlist, which grants `Bash(python3:*)` but no `jq`.)
 
 ## Step 1 — Collect update context (run BEFORE any write)
 
