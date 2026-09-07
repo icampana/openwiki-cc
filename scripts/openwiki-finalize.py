@@ -15,6 +15,7 @@ Two rules govern everything below:
    both the in-agent no-op check and hooks/openwiki-gate.sh.
 """
 import argparse
+import datetime
 import hashlib
 import json
 import pathlib
@@ -686,11 +687,68 @@ def write_state(wiki):
     return migrated, len(entries)
 
 
+def read_state(state_path):
+    """Load the snapshot entries, or None when the file is missing/corrupt.
+
+    A missing state file is conservative: the caller treats every page as
+    changed, matching upstream's migration behavior. It self-corrects on the
+    next run, which writes a fresh snapshot first.
+    """
+    try:
+        with open(state_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
+
+
+def delete_state(state_path):
+    try:
+        state_path.unlink()
+    except OSError:
+        pass
+
+
+def utc_now():
+    """One shared run timestamp, UTC ISO 8601 with seconds, matching the
+    `at` shape upstream writes (explicit UTC designator, no microseconds)."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def pass_provenance(wiki, actor, at, state_path):
+    """Stamp generated provenance per the snapshot. Runs LAST, after index
+    sync and link validation, exactly like upstream's `generated_provenance`
+    operation. Skips reserved files and unreadable pages, never failing."""
+    snapshot = read_state(state_path)
+    entries = {e["page"]: e for e in snapshot} if snapshot is not None else None
+    changed = []
+    for path in markdown_files(wiki):
+        if path.name in RESERVED:
+            continue
+        text = read_text_or_none(path)
+        if text is None:
+            continue
+        rel = path.relative_to(wiki).as_posix()
+        prior = entries.get(rel) if entries is not None else None
+        body_changed = prior is None or prior.get("bodyHash") != body_hash(text)
+        if body_changed:
+            candidate = canonicalize_terminal(
+                remove_field(set_generated_event(text, actor, at), "timestamp"))
+        else:
+            candidate = restore_generated_event(text, prior.get("generated"))
+        updated = repair_frontmatter(candidate)
+        if updated != text and write_text_or_skip(path, updated):
+            changed.append(str(path))
+    return changed
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("wiki", nargs="?", default="openwiki")
     ap.add_argument("--snapshot", action="store_true",
                     help="prepare mode: migrate front matter, then write the provenance state file")
+    ap.add_argument("--actor", default="openwiki-cc",
+                    help="producer recorded in `generated` events (the command passes the running model id)")
     args = ap.parse_args()
 
     wiki = pathlib.Path(args.wiki)
@@ -703,12 +761,18 @@ def main():
         print("openwiki-finalize: migrated %d file(s), snapshot %d page(s)" % (fm, pages))
         return 0
 
-    fm = pass_frontmatter(wiki)
+    # Sanitize the actor: it is interpolated into front-matter lines, so a
+    # newline-bearing value would inject lines. Strip it; an empty result
+    # falls back to the default so the stamp always names a producer.
+    actor = (args.actor or "").strip() or "openwiki-cc"
+
     idx = pass_indexes(wiki)
     lnk = pass_links(wiki)
-    print("openwiki-finalize: front matter %d, indexes %d, links %d"
-          % (len(fm), len(idx), len(lnk)))
-    for path in fm + idx + lnk:
+    prov = pass_provenance(wiki, actor, utc_now(), state_path_for(wiki))
+    delete_state(state_path_for(wiki))
+    print("openwiki-finalize: indexes %d, links %d, provenance %d"
+          % (len(idx), len(lnk), len(prov)))
+    for path in idx + lnk + prov:
         print("  + %s" % path)
     return 0
 
