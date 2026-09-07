@@ -707,6 +707,7 @@ class TestProvenancePass(TempWiki):
             self.wiki, "m", "2026-09-07T12:00:00Z", finalize.state_path_for(self.wiki))
         self.assertIn("generated: { by: m, at:", p.read_text(encoding="utf-8"))
         self.assertTrue(changed)
+```
 
 For the rewritten CLI idempotence test, replace the old body with:
 
