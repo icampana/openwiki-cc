@@ -15,6 +15,8 @@ Two rules govern everything below:
    both the in-agent no-op check and hooks/openwiki-gate.sh.
 """
 import argparse
+import hashlib
+import json
 import pathlib
 import re
 import sys
@@ -528,14 +530,92 @@ def pass_links(wiki):
     return changed
 
 
+STATE_FILENAME = ".openwiki-run.json"
+
+
+def state_path_for(wiki):
+    """Repo-root provenance state: the directory holding the wiki, mirroring
+    upstream's `.run.json` beside the wiki rather than inside it."""
+    return wiki.resolve().parent / STATE_FILENAME
+
+
+_GENERATED_RE = re.compile(
+    r"^\s*generated:\s*\{\s*by:\s*(?P<by>[^,}]+?)\s*"
+    r"(?:,\s*at:\s*(?P<at>[^}]+?)\s*)?\}\s*$"
+)
+
+
+def read_generated_event(text):
+    """Parse a valid `generated: { by, at? }` flow mapping from front matter.
+
+    Returns a dict, or None when the page has no block or no valid mapping.
+    """
+    fields_text, _ = split_frontmatter(text)
+    if fields_text is None:
+        return None
+    for line in fields_text.splitlines():
+        m = _GENERATED_RE.match(line)
+        if m:
+            by = m.group("by").strip().strip("'\"")
+            at = (m.group("at") or "").strip().strip("'\"") or None
+            if by:
+                return {"by": by, "at": at} if at else {"by": by}
+    return None
+
+
+def body_hash(text):
+    """SHA-256 of the body excluding front matter, whitespace retained.
+
+    Any body change — including whitespace — advances the hash, so the
+    finalize pass stamps exactly the pages this run touched.
+    """
+    _, body = split_frontmatter(text)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def write_state(wiki):
+    """Migrate front matter, then snapshot per-page body hashes + prior
+    generated events. Overwrites any stale state file. Returns
+    (migrated_count, snapshot_count)."""
+    migrated = len(pass_frontmatter(wiki))
+    entries = []
+    for path in markdown_files(wiki):
+        if path.name in RESERVED:
+            continue
+        text = read_text_or_none(path)
+        if text is None:
+            continue
+        entry = {"page": path.relative_to(wiki).as_posix(),
+                 "bodyHash": body_hash(text)}
+        event = read_generated_event(text)
+        if event:
+            entry["generated"] = event
+        entries.append(entry)
+    entries.sort(key=lambda e: e["page"])
+    try:
+        with open(state_path_for(wiki), "w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=2)
+            f.write("\n")
+    except OSError as exc:
+        print("openwiki-finalize: could not write state (%s)" % exc)
+    return migrated, len(entries)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("wiki", nargs="?", default="openwiki")
+    ap.add_argument("--snapshot", action="store_true",
+                    help="prepare mode: migrate front matter, then write the provenance state file")
     args = ap.parse_args()
 
     wiki = pathlib.Path(args.wiki)
     if not wiki.is_dir():
         print("openwiki-finalize: no such directory: %s (nothing to do)" % wiki)
+        return 0
+
+    if args.snapshot:
+        fm, pages = write_state(wiki)
+        print("openwiki-finalize: migrated %d file(s), snapshot %d page(s)" % (fm, pages))
         return 0
 
     fm = pass_frontmatter(wiki)

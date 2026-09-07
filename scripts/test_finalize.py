@@ -787,6 +787,51 @@ class TestPunctuatedAnchors(TempWiki):
         self.assertIn(MARKER, bad.read_text(encoding="utf-8"))
 
 
+class TestSnapshot(TempWiki):
+    def state_path(self):
+        return self.tmp / ".openwiki-run.json"
+
+    def test_snapshot_records_body_hash_excluding_frontmatter(self):
+        import hashlib
+        self.write("a.md", '---\ntype: Playbook\ntitle: A\n---\n\n# A\n\nBody here.\n')
+        finalize.write_state(self.wiki)
+        import json
+        entries = json.loads(self.state_path().read_text(encoding="utf-8"))
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["page"], "a.md")
+        self.assertEqual(entries[0]["bodyHash"],
+                         hashlib.sha256(b"\n# A\n\nBody here.\n").hexdigest())
+        self.assertNotIn("generated", entries[0])
+
+    def test_snapshot_records_prior_generated_event(self):
+        self.write("a.md", '---\ntype: Playbook\ntitle: A\ngenerated: { by: m, at: 2026-01-01T00:00:00Z }\n---\n\n# A\n\nB.\n')
+        finalize.write_state(self.wiki)
+        import json
+        entries = json.loads(self.state_path().read_text(encoding="utf-8"))
+        self.assertEqual(entries[0]["generated"], {"by": "m", "at": "2026-01-01T00:00:00Z"})
+
+    def test_snapshot_migrates_frontmatter_first(self):
+        p = self.write("bare.md", "# Bare\n\nProse.\n")
+        finalize.write_state(self.wiki)
+        self.assertTrue(p.read_text(encoding="utf-8").startswith("---\n"))
+
+    def test_snapshot_overwrites_stale_state(self):
+        self.state_path().write_text("STALE", encoding="utf-8")
+        self.write("a.md", "# A\n\nB.\n")
+        finalize.write_state(self.wiki)
+        import json
+        entries = json.loads(self.state_path().read_text(encoding="utf-8"))
+        self.assertEqual(entries[0]["page"], "a.md")
+
+    def test_snapshot_skips_reserved_pages(self):
+        self.write("index.md", "# Idx\n")
+        self.write("real.md", "# Real\n\nB.\n")
+        finalize.write_state(self.wiki)
+        import json
+        pages = [e["page"] for e in json.loads(self.state_path().read_text(encoding="utf-8"))]
+        self.assertEqual(pages, ["real.md"])
+
+
 class TestShippedCopy(unittest.TestCase):
     def test_skill_ships_an_identical_finalizer(self):
         """The skill folder carries its own copy for installed-skill runs.
