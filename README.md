@@ -270,6 +270,28 @@ Copy the script under `.claude/hooks/` and wire it in `.claude/settings.json`:
   the frontier model on a real change.
 - Self-check: `sh hooks/test_gate.sh` (stubs `claude`; exercises every skip/run branch).
 
+### Codex and opencode
+
+**Codex** uses the same hook shape as Claude Code, so this repository ships the wiring in
+[`.codex/hooks.json`](.codex/hooks.json) — a `Stop` hook running `sh hooks/openwiki-gate.sh`.
+Nothing to copy.
+
+**opencode** has no JSON hook array. It fires events into TypeScript plugins under
+`~/.config/opencode/plugins/`, so wiring the gate there means a small plugin that shells out
+to the same script.
+
+Either way, change the spawn line: [`hooks/openwiki-gate.sh`](hooks/openwiki-gate.sh) hardcodes
+`claude -p`, so under another host swap the last line for its headless command.
+
+```sh
+OPENWIKI_HOOK=1 setsid codex exec '$openwiki update' >/dev/null 2>&1 &            # Codex
+OPENWIKI_HOOK=1 setsid opencode run 'update the openwiki docs' >/dev/null 2>&1 &  # opencode
+```
+
+Everything above still holds: the shell-level gate and the `OPENWIKI_HOOK` recursion guard.
+`sh hooks/test_gate.sh` stubs `claude`, so run it against the unmodified script — it doesn't
+cover a swapped spawn line.
+
 ## Fidelity to upstream
 
 **Tracked against upstream `v0.5.0`, repository output mode.** The reproduced surface is the
