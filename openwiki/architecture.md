@@ -17,8 +17,8 @@ Start at [quickstart.md](quickstart.md) if you haven't; this page is the deep di
 ## Three hosts, two agent definitions
 
 The agent is written twice, not three times. Codex and opencode both discover
-`.agents/skills/<name>/SKILL.md`, so one skill file serves both; opencode additionally gets a thin
-definition per host family, with no agent logic duplicated between them.
+`.agents/skills/<name>/SKILL.md`, so one skill file serves both; Claude Code gets the other
+definition. No agent logic is duplicated beyond those two.
 
 | | Claude Code — [`commands/wiki.md`](../commands/wiki.md) | opencode — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) | Codex — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) |
 |---|---|---|---|
@@ -158,9 +158,9 @@ explicitly asked. `openwiki/INSTRUCTIONS.md`, when present, is treated the same 
 scope and priorities, never rewritten as part of routine init/update runs — and reserved from
 concept front matter, index entries, and provenance like `index.md` and `log.md`.
 
-## Auto-run via a Stop/SessionEnd hook
+## Auto-run via a session-end hook
 
-To keep the wiki fresh automatically, a Claude Code hook can invoke the command headlessly
+To keep the wiki fresh automatically, a host hook can invoke the command headlessly
 (`claude -p '/openwiki:wiki update' --permission-mode acceptEdits`). The naive version spawns a
 full frontier-model run **every turn** — even when nothing changed, it pays the model cost just to
 let Step 0 discover there's no work.
@@ -176,6 +176,14 @@ and detaches with `setsid` so it never blocks the session. Wired in `.claude/set
 With the gate, `Stop` (every turn) is cheap enough for continuously-live docs; the frontier model
 starts only on a real change. [`hooks/test_gate.sh`](../hooks/test_gate.sh) stubs `claude` and
 exercises every skip/run branch — run it after touching the gate.
+
+The other two hosts drive the same script from their own session-end event: Codex through
+[`.codex/hooks.json`](../.codex/hooks.json) (`Stop`, same JSON shape as Claude Code) and opencode
+through [`.opencode/plugins/openwiki-gate.ts`](../.opencode/plugins/openwiki-gate.ts)
+(`session.idle`, since opencode has no JSON hook array). Both resolve `hooks/openwiki-gate.sh`
+relative to the project directory, so the wiring only fires in a repository that carries the
+script. The script's spawn line is `claude -p`; a Codex or opencode user swaps it for
+`codex exec` or `opencode run`.
 
 ## Detecting upstream drift
 

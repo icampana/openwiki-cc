@@ -51,8 +51,7 @@ inside the skill folder, so every install path gets full behavior with no extra 
 before the script shipped? `npx skills update openwiki` refreshes your copy.
 
 Invocation is unchanged from the host sections below: `$openwiki`, or ask for "init / update the
-openwiki docs". On opencode you can additionally install the `/wiki` command for real slash
-arguments.
+openwiki docs".
 
 ## Install — Claude Code
 
@@ -262,13 +261,16 @@ Copy the script under `.claude/hooks/` and wire it in `.claude/settings.json`:
 
 **Codex** uses the same hook shape as Claude Code, so this repository ships the wiring in
 [`.codex/hooks.json`](.codex/hooks.json) — a `Stop` hook running `sh hooks/openwiki-gate.sh`.
-Nothing to copy.
 
 **opencode** has no JSON hook array. It fires events into JS/TS plugins, loaded automatically
 from `.opencode/plugins/` (project) and `~/.config/opencode/plugins/` (global). This repository
 ships [`.opencode/plugins/openwiki-gate.ts`](.opencode/plugins/openwiki-gate.ts), which listens
-for `session.idle` — opencode's counterpart to `Stop` — and runs the same gate script. Copy it to
-`~/.config/opencode/plugins/` to gate every repository.
+for `session.idle` — opencode's counterpart to `Stop`.
+
+Both wirings run `hooks/openwiki-gate.sh` by a path relative to the project directory, so gate
+each repository the same way you would for Claude Code: copy the script in, then add the host's
+wiring beside it. A global opencode plugin on its own gates nothing, and the plugin calls the
+script with `.nothrow()`, so a missing script fails silently rather than erroring.
 
 Either way, change the spawn line: [`hooks/openwiki-gate.sh`](hooks/openwiki-gate.sh) hardcodes
 `claude -p`, so under another host swap the last line for its headless command.
@@ -387,6 +389,11 @@ commands/
   wiki.md            # Claude Code slash command (system prompt + git + idempotence)
 .agents/skills/
   openwiki/SKILL.md  # skill for Codex AND opencode (same agent, shell tool vocabulary)
+  openwiki/scripts/openwiki-finalize.py  # byte-identical twin of scripts/, so the skill installs complete
+.codex/
+  hooks.json         # Codex Stop hook → the gate (this repo only)
+.opencode/
+  plugins/openwiki-gate.ts  # opencode session.idle plugin → the gate (this repo only)
 hooks/
   openwiki-gate.sh   # shell gate for hook-driven auto-run
   test_gate.sh       # self-check for the gate

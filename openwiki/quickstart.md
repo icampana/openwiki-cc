@@ -27,7 +27,7 @@ deliverable is the agent definition itself, expressed as prompt files.
 | [`commands/wiki.md`](../commands/wiki.md) | The Claude Code slash command → `/openwiki:wiki`. Contains the full routing, the six-step lifecycle (Steps 0, 1, 2, 3, 3b, 4), and the verbatim upstream planner + per-page-worker prompts. **This is the canonical agent definition.** |
 | [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) | The same agent for the shell-based hosts — **Codex** (`$openwiki`) and **opencode**, which both discover `.agents/skills/`. Same planner/worker prompts and lifecycle; the per-page-worker dispatch section is host-conditional (one subagent per page where the host has a subagent tool, sequential writing under the same worker discipline on Codex). |
 | [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json), [`marketplace.json`](../.claude-plugin/marketplace.json) | Packaging so Claude Code can install the command as a plugin from a marketplace. |
-| [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh) | Optional shell gate for auto-running the wiki from a Claude Code `Stop`/`SessionEnd` hook — spawns the frontier model only when source actually changed. |
+| [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh) | Optional shell gate for auto-running the wiki from a session-end hook on any of the three hosts — Claude Code `Stop`/`SessionEnd`, Codex `Stop` ([`.codex/hooks.json`](../.codex/hooks.json)), opencode `session.idle` ([`.opencode/plugins/openwiki-gate.ts`](../.opencode/plugins/openwiki-gate.ts)). Spawns the frontier model only when source actually changed. |
 | [`hooks/test_gate.sh`](../hooks/test_gate.sh) | Self-check for the gate's skip/run decisions. |
 | [`upstream.lock.json`](../upstream.lock.json) | The upstream ref this port was ported from, plus a SHA-256 per reproduced file. |
 | [`scripts/check-upstream-drift.sh`](../scripts/check-upstream-drift.sh) | Re-hashes those files against the latest upstream release. |
@@ -54,7 +54,7 @@ tracks it with host-specific adaptations. When they disagree, `commands/wiki.md`
 
 **Claude Code (plugin):**
 ```
-/plugin marketplace add SoulKyu/openwiki-cc
+/plugin marketplace add icampana/openwiki-cc
 /plugin install openwiki@openwiki-cc
 ```
 Then from the root of a target repo: `/openwiki:wiki` (auto-routes), `/openwiki:wiki init`, or
