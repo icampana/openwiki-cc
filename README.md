@@ -276,9 +276,11 @@ Copy the script under `.claude/hooks/` and wire it in `.claude/settings.json`:
 [`.codex/hooks.json`](.codex/hooks.json) — a `Stop` hook running `sh hooks/openwiki-gate.sh`.
 Nothing to copy.
 
-**opencode** has no JSON hook array. It fires events into TypeScript plugins under
-`~/.config/opencode/plugins/`, so wiring the gate there means a small plugin that shells out
-to the same script.
+**opencode** has no JSON hook array. It fires events into JS/TS plugins, loaded automatically
+from `.opencode/plugins/` (project) and `~/.config/opencode/plugins/` (global). This repository
+ships [`.opencode/plugins/openwiki-gate.ts`](.opencode/plugins/openwiki-gate.ts), which listens
+for `session.idle` — opencode's counterpart to `Stop` — and runs the same gate script. Copy it to
+`~/.config/opencode/plugins/` to gate every repository.
 
 Either way, change the spawn line: [`hooks/openwiki-gate.sh`](hooks/openwiki-gate.sh) hardcodes
 `claude -p`, so under another host swap the last line for its headless command.
