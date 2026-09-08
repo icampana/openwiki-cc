@@ -126,16 +126,30 @@ First locate the finalizer. It ships with every install layout, but not always a
 path, and the working directory is the *target* repository rather than the install:
 
 ```bash
-ls "$CLAUDE_PLUGIN_ROOT/scripts/openwiki-finalize.py" .claude/skills/openwiki/scripts/openwiki-finalize.py .agents/skills/openwiki/scripts/openwiki-finalize.py "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py" scripts/openwiki-finalize.py 2>/dev/null | head -1
+for c in "${CLAUDE_PLUGIN_ROOT:-}/scripts/openwiki-finalize.py" \
+         scripts/openwiki-finalize.py \
+         .claude/skills/openwiki/scripts/openwiki-finalize.py \
+         .agents/skills/openwiki/scripts/openwiki-finalize.py \
+         "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" \
+         "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py"; do
+  [ -f "$c" ] && python3 "$c" --help 2>/dev/null | grep -q -- --snapshot && { echo "$c"; break; }
+done
 ```
 
-`ls` sorts its operands, so with several layouts present the winner is whichever path sorts
-first, not the order listed. Every copy is byte-identical (CI enforces it), so any hit is correct.
-Remember the path it prints; Step 3b uses the same one.
+The loop probes each candidate for the `--snapshot` flag this step needs, then stops at the
+first one that has it. That matters because a machine can hold several installs at different
+versions — a hand-copied `~/.agents` skill next to the plugin, say — and only a probe tells
+them apart. Do not substitute `ls`: it sorts its operands, the `eza` alias many users install
+does not, so the winner would vary by shell. Order matters: a plugin install wins when
+`CLAUDE_PLUGIN_ROOT` is set, since that is the copy the host manages; otherwise a repository's
+own `scripts/` is preferred over a hand-installed global skill, which is the copy most likely to
+have gone stale. Remember the path it prints; Step 3b uses the same one.
 
-If the `ls` prints nothing, the script is genuinely unavailable: say so in your final message
-and skip both this step and Step 3b. Do not hand-write front matter, indexes, or
-provenance — that is non-deterministic and would break idempotence.
+If the loop prints nothing, no usable finalizer is installed — either none is present, or every
+copy predates provenance. Say so in your final message, name the paths you probed, and skip
+both this step and Step 3b. Do not hand-write front matter, indexes, or provenance — that is
+non-deterministic and would break idempotence. Do not fall back to a copy that rejects
+`--snapshot`: collapsing Steps 2 and 3b into one call drops provenance stamping silently.
 
 Run prepare mode:
 
@@ -364,7 +378,6 @@ allowlist. In `.claude/settings.json`:
       "Bash(git --no-pager show:*)",
       "Bash(git --no-pager blame:*)",
       "Bash(python3:*)",
-      "Bash(ls:*)",
       "Bash(find:*)",
       "Bash(sha256sum:*)",
       "Bash(rg:*)",
@@ -381,8 +394,9 @@ deliberate: under a plugin or skill install the finalizer sits at an absolute, v
 path that no static prefix can match, so pinning the path blocks Step 3b rather than permitting
 it. Be aware of what you are granting — `python3` can write anywhere, so this entry is wider than
 the `Edit`/`Write` scoping below it. If that matters more to you than Step 3b, drop both
-`Bash(python3:*)` and `Bash(ls:*)`; the run then reports the finalizer as unavailable and skips
-the step instead of failing. `Bash(ls:*)` on its own only covers the lookup.
+`Bash(python3:*)`; the run then reports the finalizer as unavailable and skips the step instead
+of failing. Note that `Bash(python3:*)` now gates the Step 2 lookup as well as Steps 2 and 3b,
+because the lookup probes each candidate with `python3 "$c" --help`.
 
 `AGENTS.md` / `CLAUDE.md` are deliberately absent from this allowlist: the worker prompt above
 already forbids writing them during normal runs, and granting the permission anyway would leave

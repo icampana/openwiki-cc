@@ -135,16 +135,30 @@ First locate the finalizer. It ships with every install layout, but not always a
 path, and the working directory is the *target* repository rather than the install:
 
 ```bash
-ls "$CLAUDE_PLUGIN_ROOT/scripts/openwiki-finalize.py" .claude/skills/openwiki/scripts/openwiki-finalize.py .agents/skills/openwiki/scripts/openwiki-finalize.py "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py" scripts/openwiki-finalize.py 2>/dev/null | head -1
+for c in "${CLAUDE_PLUGIN_ROOT:-}/scripts/openwiki-finalize.py" \
+         scripts/openwiki-finalize.py \
+         .claude/skills/openwiki/scripts/openwiki-finalize.py \
+         .agents/skills/openwiki/scripts/openwiki-finalize.py \
+         "$HOME/.claude/skills/openwiki/scripts/openwiki-finalize.py" \
+         "$HOME/.agents/skills/openwiki/scripts/openwiki-finalize.py"; do
+  [ -f "$c" ] && python3 "$c" --help 2>/dev/null | grep -q -- --snapshot && { echo "$c"; break; }
+done
 ```
 
-`ls` sorts its operands, so with several layouts present the winner is whichever path sorts
-first, not the order listed. Every copy is byte-identical (CI enforces it), so any hit is correct.
-Remember the path it prints; Step 3b uses the same one.
+The loop probes each candidate for the `--snapshot` flag this step needs, then stops at the
+first one that has it. That matters because a machine can hold several installs at different
+versions — a hand-copied `~/.agents` skill next to the plugin, say — and only a probe tells
+them apart. Do not substitute `ls`: it sorts its operands, the `eza` alias many users install
+does not, so the winner would vary by shell. Order matters: a plugin install wins when
+`CLAUDE_PLUGIN_ROOT` is set, since that is the copy the host manages; otherwise a repository's
+own `scripts/` is preferred over a hand-installed global skill, which is the copy most likely to
+have gone stale. Remember the path it prints; Step 3b uses the same one.
 
-If the `ls` prints nothing, the script is genuinely unavailable: say so in your final message
-and skip both this step and Step 3b. Do not hand-write front matter, indexes, or
-provenance — that is non-deterministic and would break idempotence.
+If the loop prints nothing, no usable finalizer is installed — either none is present, or every
+copy predates provenance. Say so in your final message, name the paths you probed, and skip
+both this step and Step 3b. Do not hand-write front matter, indexes, or provenance — that is
+non-deterministic and would break idempotence. Do not fall back to a copy that rejects
+`--snapshot`: collapsing Steps 2 and 3b into one call drops provenance stamping silently.
 
 Run prepare mode:
 
@@ -304,7 +318,7 @@ Run it AFTER the wiki work. It is idempotent: a run that changes no page bodies 
 every wiki file byte-identical (only `.last-update.json` refreshes in Step 4, by
 design — see below).
 
-If the Step 2 `ls` printed nothing, the script is genuinely unavailable: say so in your final
+If the Step 2 lookup printed nothing, the script is genuinely unavailable: say so in your final
 message and skip this step. Do not hand-write front matter, indexes, or
 provenance — that is non-deterministic and would break idempotence.
 

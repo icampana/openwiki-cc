@@ -974,5 +974,133 @@ class TestShippedCopy(unittest.TestCase):
         self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
 
 
+DOC_PAIR = ("commands/wiki.md", ".agents/skills/openwiki/SKILL.md")
+
+
+def _resolution_snippet(doc):
+    """Pull the fenced shell block that resolves the finalizer path."""
+    lines = (pathlib.Path(__file__).parent.parent / doc).read_text().splitlines()
+    blocks, cur = [], None
+    for line in lines:
+        if line.startswith("```"):
+            if cur is None:
+                cur = []
+            else:
+                blocks.append("\n".join(cur))
+                cur = None
+            continue
+        if cur is not None:
+            cur.append(line)
+    for b in blocks:
+        if "openwiki-finalize.py" in b and "CLAUDE_PLUGIN_ROOT" in b:
+            return b
+    raise AssertionError("no resolution block found in %s" % doc)
+
+
+class TestFinalizerResolution(unittest.TestCase):
+    """The documented resolution must reject a stale candidate.
+
+    A machine can hold several installs at different versions (a hand-copied
+    ~/.agents skill alongside the plugin). Picking by path order alone hands the
+    agent a finalizer that rejects --snapshot mid-run, so it degrades silently
+    instead of failing. Resolution must probe for the capability it will use.
+    """
+
+    CURRENT = '#!/usr/bin/env python3\nprint("usage: [-h] [--snapshot] [--actor ACTOR] [wiki]")\n'
+    STALE = '#!/usr/bin/env python3\nprint("usage: [-h] [wiki]")\n'
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _plant(self, rel, body):
+        path = self.tmp / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        return path
+
+    def _resolve(self, doc):
+        env = dict(os.environ)
+        env["CLAUDE_PLUGIN_ROOT"] = str(self.tmp / "plugin")
+        env["HOME"] = str(self.tmp / "home")
+        out = subprocess.run(
+            ["sh", "-c", _resolution_snippet(doc)],
+            cwd=self.tmp / "repo", env=env,
+            capture_output=True, text=True,
+        )
+        return out.stdout.strip()
+
+    def test_stale_candidate_is_skipped_for_a_current_one(self):
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                self._plant("plugin/scripts/openwiki-finalize.py", self.STALE)
+                current = self._plant("repo/scripts/openwiki-finalize.py", self.CURRENT)
+                self.assertEqual(self._resolve(doc), str(current.relative_to(self.tmp / "repo")))
+
+    def test_resolves_to_nothing_when_every_candidate_is_stale(self):
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                self._plant("plugin/scripts/openwiki-finalize.py", self.STALE)
+                self._plant("repo/scripts/openwiki-finalize.py", self.STALE)
+                self.assertEqual(self._resolve(doc), "")
+
+    def test_survives_strict_shell_with_no_plugin_root(self):
+        """The repo ships a `set -eu` hook; an unset CLAUDE_PLUGIN_ROOT must not abort."""
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                self._plant("repo/scripts/openwiki-finalize.py", self.CURRENT)
+                env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
+                env["HOME"] = str(self.tmp / "home")
+                out = subprocess.run(
+                    ["sh", "-euc", _resolution_snippet(doc)],
+                    cwd=self.tmp / "repo", env=env, capture_output=True, text=True,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(out.stdout.strip(), "scripts/openwiki-finalize.py")
+
+    def test_plugin_root_wins_over_repo_source_when_both_are_current(self):
+        """Documented precedence: the host-managed plugin copy outranks a repo checkout."""
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                plugin = self._plant("plugin/scripts/openwiki-finalize.py", self.CURRENT)
+                self._plant("repo/scripts/openwiki-finalize.py", self.CURRENT)
+                self.assertEqual(self._resolve(doc), str(plugin))
+
+    def test_repo_source_wins_over_a_global_skill_install(self):
+        """With no plugin root, a checkout beats a hand-installed global copy."""
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                self._plant("home/.agents/skills/openwiki/scripts/openwiki-finalize.py", self.CURRENT)
+                self._plant("repo/scripts/openwiki-finalize.py", self.CURRENT)
+                env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
+                env["HOME"] = str(self.tmp / "home")
+                out = subprocess.run(
+                    ["sh", "-c", _resolution_snippet(doc)],
+                    cwd=self.tmp / "repo", env=env, capture_output=True, text=True,
+                )
+                self.assertEqual(out.stdout.strip(), "scripts/openwiki-finalize.py")
+
+    def test_resolution_does_not_depend_on_ls_operand_ordering(self):
+        """`ls` sorts operands; the eza alias many users install does not."""
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                self.assertNotIn("ls ", _resolution_snippet(doc))
+
+
+class TestDocClaims(unittest.TestCase):
+    def test_allowlist_does_not_grant_ls_for_the_lookup(self):
+        """The lookup probes with `python3 --help`; Bash(ls:*) would cover nothing."""
+        text = (pathlib.Path(__file__).parent.parent / "commands/wiki.md").read_text()
+        self.assertNotIn('"Bash(ls:*)"', text)
+
+    def test_no_claim_that_every_installed_copy_is_identical(self):
+        """CI compares two in-repo paths at one commit, not installs on a machine."""
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                text = (pathlib.Path(__file__).parent.parent / doc).read_text()
+                self.assertNotIn("Every copy is byte-identical", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
