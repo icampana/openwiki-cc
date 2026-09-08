@@ -1,43 +1,57 @@
 {
   "upstream": "langchain-ai/openwiki",
-  "trackedRef": "v0.3.3",
-  "trackedVersion": "0.3.3",
+  "trackedRef": "v0.5.0",
+  "trackedVersion": "0.5.0",
   "comment": "The upstream files this port reproduces, hashed at trackedRef. Regenerate with: sh scripts/check-upstream-drift.sh --update. A file recorded as GONE does not exist at trackedRef; it is listed because the port must eventually cover it.",
   "files": {
     "src/agent/index.ts": {
-      "sha256": "9cb36eacec7df71ac2ab2205d80c96bd3a8af60321eca5247c82c5de14b176b3",
-      "bytes": 61637,
+      "sha256": "cac9867a6f3bc76e19108fb91c7f44d8bc4e957cfe0712571b55653a11dea181",
+      "bytes": 68741,
       "why": "the run lifecycle: snapshot before, no-op decision, metadata write after"
     },
-    "src/agent/prompt.ts": {
-      "sha256": "6c81cad1bab9863e147afaee39464ca6dbee5a195d9d14b66a3f6bb104bc13e3",
-      "bytes": 9129,
-      "why": "the verbatim system prompt reproduced in commands/wiki.md Step 3 and SKILL.md"
-    },
-    "src/agent/prompts/code.ts": {
-      "sha256": "4f95d78b2a253c3d36d8149d50473e2c277ab7f57f92ab5034eda0107c33690a",
-      "bytes": 51171,
-      "why": "CODE_SYSTEM_PROMPTS.init and .update, reproduced verbatim in commands/wiki.md Step 3 and SKILL.md"
+    "src/agent/repository-prompts.ts": {
+      "sha256": "82814e5b5071c1af1221b95f8c6e1e5111e90d7d78932b90c4b1ac4262ee77b0",
+      "bytes": 9463,
+      "why": "createRepositoryPlannerPrompt and createRepositoryPagePrompt, reproduced in commands/wiki.md Step 3 and SKILL.md"
     },
     "src/agent/utils.ts": {
-      "sha256": "0e89f74b0b2bd3c34f70f2060b71ad13bd15156c7b5f7efb1bba6cd37003ba36",
-      "bytes": 14768,
+      "sha256": "952e943a0d9e61469768640aaa050e23f1869fbedcf032c8796c17bae11ae65d",
+      "bytes": 29960,
       "why": "git-evidence commands, getUpdateNoopStatus, and the .last-update.json shape used by commands/wiki.md and hooks/openwiki-gate.sh"
     },
+    "src/agent/wiki-finalizer.ts": {
+      "sha256": "9cdbee2c46c0df79c4138d799bbaf8cbfe7822509c108f3db2921029fe30b1aa",
+      "bytes": 8185,
+      "why": "prepareWikiForAuthoring / finalizeWikiArtifacts lifecycle, reproduced by the two modes of scripts/openwiki-finalize.py"
+    },
+    "src/agent/wiki-link-validator.ts": {
+      "sha256": "a7ce8b2be38594c14d13f926f3bfcc807443c14e08715e9dfc8019bcd3abbfd7",
+      "bytes": 14536,
+      "why": "validateWikiInternalLinks, reproduced by pass 3 of scripts/openwiki-finalize.py (tracked late — the v0.3.3 lock omitted it)"
+    },
     "src/okf/frontmatter.ts": {
-      "sha256": "8e3f11c3fb53cc830c5141af0a1956fb373f62b798aa88f8e732c6bead57d4db",
-      "bytes": 12416,
+      "sha256": "a8241b4c597d8df901202eebb409006937856c7be8e95c14287de77930a6933e",
+      "bytes": 26282,
       "why": "OKF front matter validation and deriveMinimalFrontmatter, reproduced by pass 1 of scripts/openwiki-finalize.py"
     },
+    "src/okf/generated-provenance.ts": {
+      "sha256": "8e4b18ba77b0936a5eef4fbf03f120b3dc9dbb338eec2c218f6478e8c8ef4b8a",
+      "bytes": 10073,
+      "why": "body-hash snapshot and generated-event reconciliation, reproduced by the provenance pass of scripts/openwiki-finalize.py"
+    },
     "src/okf/index-sync.ts": {
-      "sha256": "869c524c0b324c2a51794fc124c1028aa486fe34e5506c50d0713c3e9326e291",
-      "bytes": 8932,
+      "sha256": "67d43ef8ea85eaf9b115e067ec2f3076462c7063cd57804d87ef483b38f57db1",
+      "bytes": 9502,
       "why": "synchronizeWikiIndexes, reproduced by pass 2 of scripts/openwiki-finalize.py"
     }
   },
   "notCovered": {
     "src/agent/prompts/personal.ts": "personal-wiki output mode (outputMode: local-wiki); a different product from repository documentation",
     "CODE_SYSTEM_PROMPTS.chat": "interactive chat; this port auto-routes between init and update instead",
-    "--language flag": "no slash-command equivalent, so language is omitted from run metadata"
+    "--language flag": "no slash-command equivalent, so language is omitted from run metadata",
+    "src/claims/*, src/okf/claim-sources.ts, src/okf/claims-verification.ts": "grounded claims with machine verification (claims store, evidence resolvers); a prompt-only port cannot provide them, so workers write pages directly",
+    "src/generation/*": "durable resumable page jobs and .run.json persistence; the port runs in one session and plans updates from the last recorded gitHead",
+    "src/mermaid/*": "mermaid fence parse-validation; Python's standard library cannot parse mermaid, and the repository prompts carry no diagram discipline to lose",
+    "src/integrations/*": "upstream's own coding-agent installer; this port is the alternative distribution"
   }
 }

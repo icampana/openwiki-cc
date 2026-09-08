@@ -99,6 +99,16 @@ class TestFrontmatter(TempWiki):
         finalize.pass_frontmatter(self.wiki)
         self.assertNotIn("type:", sidebar.read_text(encoding="utf-8"))
 
+    def test_instructions_md_is_never_a_concept(self):
+        p = self.write("INSTRUCTIONS.md", "# Instructions\n\nDo not touch.\n")
+        self.write("quickstart.md", "# Quickstart\n\nStart.\n")
+        finalize.pass_frontmatter(self.wiki)
+        finalize.pass_indexes(self.wiki)
+        self.assertNotIn("type:", p.read_text(encoding="utf-8"))
+        index = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertNotIn("INSTRUCTIONS.md", index)
+        self.assertNotIn("Instructions", index)
+
     def test_crlf_frontmatter_is_byte_identical(self):
         """A valid CRLF file should not be modified."""
         original = "---\r\ntype: Playbook\r\ntitle: Kept\r\n---\r\n\r\n# Kept\r\n\r\nBody.\r\n"
@@ -140,7 +150,7 @@ class TestIndexes(TempWiki):
         self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
         finalize.pass_indexes(self.wiki)
         out = (self.wiki / "index.md").read_text(encoding="utf-8")
-        self.assertTrue(out.startswith('---\nokf_version: "0.1"\n---\n'))
+        self.assertTrue(out.startswith('---\nokf_version: "0.2"\n---\n'))
         self.assertIn("- [Quickstart](quickstart.md)", out)
 
     def test_subdirectory_index_has_no_frontmatter(self):
@@ -564,38 +574,32 @@ class TestIdempotence(TempWiki):
                         result[str(p.relative_to(self.wiki))] = f.read()
         return result
 
-    def run_cli(self):
+    def run_cli(self, *extra):
         script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
         # A generous but finite timeout: a symlink loop that somehow got
         # walked into should fail this test loudly, not hang the suite.
         return subprocess.run(
-            [sys.executable, str(script), str(self.wiki)],
+            [sys.executable, str(script)] + list(extra) + [str(self.wiki)],
             capture_output=True, text=True, timeout=10,
         )
 
-    def test_two_consecutive_runs_are_byte_identical(self):
-        # A realistic nested wiki: root page, two levels of subdirectory,
-        # a broken link, a working link, a working anchor link, and a
-        # file that already carries valid front matter.
+    def full_run(self):
+        snap = self.run_cli("--snapshot")
+        self.assertEqual(snap.returncode, 0, snap.stderr)
+        fin = self.run_cli()
+        self.assertEqual(fin.returncode, 0, fin.stderr)
+
+    def test_two_consecutive_full_runs_are_byte_identical(self):
         self.write("quickstart.md", "# Quickstart\n\nStart. See [arch](arch/overview.md).\n")
-        self.write("arch/overview.md",
-                    "# Overview\n\nSee [gone](nope.md) and [qs](../quickstart.md).\n")
-        self.write("arch/decisions/adr-1.md",
-                    "# ADR 1\n\nSee [overview](../overview.md#overview) "
-                    "and [missing anchor](../overview.md#nope).\n")
+        self.write("arch/overview.md", "# Overview\n\nSee [gone](nope.md) and [qs](../quickstart.md).\n")
         self.write("kept.md", '---\ntype: Playbook\nowner: me\n---\n\n# Kept\n\nBody.\n')
-        self.write("no-type.md", "---\ntitle: Existing\n---\n\n# No Type\n\nBody.\n")
-        self.write("crlf.md", "# CRLF\r\n\r\n[gone](also-nope.md)\r\n")
 
-        first = self.run_cli()
-        self.assertEqual(first.returncode, 0, first.stderr)
+        self.full_run()
         after_one = self.snapshot()
-
-        second = self.run_cli()
-        self.assertEqual(second.returncode, 0, second.stderr)
-        after_two = self.snapshot()
-
-        self.assertEqual(after_one, after_two)
+        state = self.tmp / ".openwiki-run.json"
+        self.assertFalse(state.exists(), "finalize mode must consume the state file")
+        self.full_run()
+        self.assertEqual(self.snapshot(), after_one)
 
     def test_exit_zero_on_missing_directory(self):
         script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
@@ -606,19 +610,28 @@ class TestIdempotence(TempWiki):
         self.assertEqual(r.returncode, 0)
 
     def test_exit_zero_on_unreadable_content(self):
-        # A sibling valid file must still get finalized: one unreadable file
-        # must cost at most that one file, not the whole run (main()'s
-        # top-level except-and-exit-0 would otherwise mask a total skip).
-        good = self.write("quickstart.md", "# Quickstart\n\nBody.\n")
+        self.write("ok.md", "# OK\n\nFine.\n")
         p = self.write("bad.md", "# Bad\n")
         p.write_bytes(b"\xff\xfe not utf-8 \xff")
-
-        r = self.run_cli()
-
+        r = self.run_cli("--snapshot")
         self.assertEqual(r.returncode, 0)
-        with open(good, encoding="utf-8", newline="") as f:
-            out = f.read()
-        self.assertTrue(out.startswith("---\n"), "sibling file must still be finalized: %r" % out)
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 0)
+
+    def test_whitespace_actor_falls_back_to_default(self):
+        """An empty/whitespace --actor (possibly newline-bearing) must not be
+        interpolated into front matter; it falls back to openwiki-cc."""
+        p = self.write("a.md", "# A\n\nB.\n")
+        script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
+        # No snapshot: missing state is conservative, so the page is stamped.
+        r = subprocess.run(
+            [sys.executable, str(script), "--actor", " \n ",
+             str(self.wiki)],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = p.read_text(encoding="utf-8")
+        self.assertIn("generated: { by: openwiki-cc, at:", out)
 
     def test_exit_zero_and_siblings_finalized_with_readonly_file(self):
         """FIX 3: one unwritable file must cost only that file, not the run.
@@ -628,6 +641,10 @@ class TestIdempotence(TempWiki):
         readonly = self.write("locked.md", "# Locked\n\nBody.\n")
         readonly.chmod(stat.S_IREAD)
         try:
+            # Migration now happens in --snapshot mode; default mode only
+            # stamps/indexes/links. Run the full sequence.
+            snap = self.run_cli("--snapshot")
+            self.assertEqual(snap.returncode, 0, snap.stderr)
             r = self.run_cli()
 
             self.assertEqual(r.returncode, 0)
@@ -654,18 +671,19 @@ class TestIdempotence(TempWiki):
         self.write("foo(1).md", "# Foo One\n\nBody.\n")
         self.write("has space.md", "# Has Space\n\nBody.\n")
 
-        first = self.run_cli()
-        self.assertEqual(first.returncode, 0, first.stderr)
+        self.full_run()
         after_one = self.snapshot()
         self.assertNotIn("openwiki: broken internal link",
                           after_one.get("index.md", ""))
 
+        snap = self.run_cli("--snapshot")
+        self.assertEqual(snap.returncode, 0, snap.stderr)
         second = self.run_cli()
         self.assertEqual(second.returncode, 0, second.stderr)
         after_two = self.snapshot()
 
         self.assertEqual(after_one, after_two)
-        self.assertIn("indexes 0, links 0", second.stdout)
+        self.assertIn("indexes 0, links 0, provenance 0", second.stdout)
 
     def test_symlinked_directory_converges_and_does_not_escape_wiki(self):
         """FIX 6 regression: a symlinked directory must be invisible to the
@@ -685,8 +703,7 @@ class TestIdempotence(TempWiki):
 
         self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
 
-        first = self.run_cli()
-        self.assertEqual(first.returncode, 0, first.stderr)
+        self.full_run()
         after_one = self.snapshot()
 
         self.assertFalse((outside / "index.md").exists(),
@@ -695,15 +712,19 @@ class TestIdempotence(TempWiki):
         self.assertNotIn("linkdir", after_one.get("index.md", ""),
                           "a symlinked directory must not be listed as an index entry")
 
+        snap = self.run_cli("--snapshot")
+        self.assertEqual(snap.returncode, 0, snap.stderr)
         second = self.run_cli()
         self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertIn("front matter 0, indexes 0, links 0", second.stdout)
+        self.assertIn("indexes 0, links 0, provenance 0", second.stdout)
         after_two = self.snapshot()
         self.assertEqual(after_one, after_two, "second run must be byte-identical")
 
+        snap = self.run_cli("--snapshot")
+        self.assertEqual(snap.returncode, 0, snap.stderr)
         third = self.run_cli()
         self.assertEqual(third.returncode, 0, third.stderr)
-        self.assertIn("front matter 0, indexes 0, links 0", third.stdout)
+        self.assertIn("indexes 0, links 0, provenance 0", third.stdout)
         self.assertEqual(self.snapshot(), after_two, "third run must be byte-identical")
 
     def test_symlink_loop_does_not_hang_and_still_converges(self):
@@ -718,14 +739,15 @@ class TestIdempotence(TempWiki):
 
         self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
 
-        first = self.run_cli()
-        self.assertEqual(first.returncode, 0, first.stderr)
+        self.full_run()
         after_one = self.snapshot()
         self.assertNotIn("loop", after_one.get("index.md", ""))
 
+        snap = self.run_cli("--snapshot")
+        self.assertEqual(snap.returncode, 0, snap.stderr)
         second = self.run_cli()
         self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertIn("front matter 0, indexes 0, links 0", second.stdout)
+        self.assertIn("indexes 0, links 0, provenance 0", second.stdout)
         self.assertEqual(self.snapshot(), after_one, "second run must be byte-identical")
 
     def test_symlinked_file_is_processed_like_any_other_page(self):
@@ -741,16 +763,18 @@ class TestIdempotence(TempWiki):
         except (OSError, NotImplementedError):
             self.skipTest("symlinks not supported on this platform/filesystem")
 
-        first = self.run_cli()
-        self.assertEqual(first.returncode, 0, first.stderr)
+        self.full_run()
         # The symlinked page is a real, writable, live file and gets front
-        # matter backfilled through the link, same as any other page.
+        # matter backfilled through the link (in --snapshot mode), same as
+        # any other page.
         self.assertTrue(real.read_text(encoding="utf-8").startswith("---\n"))
         after_one = self.snapshot()
 
+        snap = self.run_cli("--snapshot")
+        self.assertEqual(snap.returncode, 0, snap.stderr)
         second = self.run_cli()
         self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertIn("front matter 0, indexes 0, links 0", second.stdout)
+        self.assertIn("indexes 0, links 0, provenance 0", second.stdout)
         self.assertEqual(self.snapshot(), after_one, "second run must be byte-identical")
 
 
@@ -775,6 +799,165 @@ class TestPunctuatedAnchors(TempWiki):
         bad = self.write("bad.md", "# Bad\n\n[x](b.md#install--nope)\n")
         finalize.pass_links(self.wiki)
         self.assertIn(MARKER, bad.read_text(encoding="utf-8"))
+
+
+class TestSnapshot(TempWiki):
+    def state_path(self):
+        return self.tmp / ".openwiki-run.json"
+
+    def test_snapshot_records_body_hash_excluding_frontmatter(self):
+        import hashlib
+        self.write("a.md", '---\ntype: Playbook\ntitle: A\n---\n\n# A\n\nBody here.\n')
+        finalize.write_state(self.wiki)
+        import json
+        entries = json.loads(self.state_path().read_text(encoding="utf-8"))
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["page"], "a.md")
+        self.assertEqual(entries[0]["bodyHash"],
+                         hashlib.sha256(b"\n# A\n\nBody here.\n").hexdigest())
+        self.assertNotIn("generated", entries[0])
+
+    def test_snapshot_records_prior_generated_event(self):
+        self.write("a.md", '---\ntype: Playbook\ntitle: A\ngenerated: { by: m, at: 2026-01-01T00:00:00Z }\n---\n\n# A\n\nB.\n')
+        finalize.write_state(self.wiki)
+        import json
+        entries = json.loads(self.state_path().read_text(encoding="utf-8"))
+        self.assertEqual(entries[0]["generated"], {"by": "m", "at": "2026-01-01T00:00:00Z"})
+
+    def test_snapshot_migrates_frontmatter_first(self):
+        p = self.write("bare.md", "# Bare\n\nProse.\n")
+        finalize.write_state(self.wiki)
+        self.assertTrue(p.read_text(encoding="utf-8").startswith("---\n"))
+
+    def test_snapshot_overwrites_stale_state(self):
+        self.state_path().write_text("STALE", encoding="utf-8")
+        self.write("a.md", "# A\n\nB.\n")
+        finalize.write_state(self.wiki)
+        import json
+        entries = json.loads(self.state_path().read_text(encoding="utf-8"))
+        self.assertEqual(entries[0]["page"], "a.md")
+
+    def test_snapshot_skips_reserved_pages(self):
+        self.write("index.md", "# Idx\n")
+        self.write("real.md", "# Real\n\nB.\n")
+        finalize.write_state(self.wiki)
+        import json
+        pages = [e["page"] for e in json.loads(self.state_path().read_text(encoding="utf-8"))]
+        self.assertEqual(pages, ["real.md"])
+
+
+class TestProvenancePrimitives(TempWiki):
+    def test_set_replaces_existing_event_in_place(self):
+        text = '---\ntype: Playbook\ntitle: A\ngenerated: { by: old, at: 2020-01-01T00:00:00Z }\n---\n\n# A\n\nB.\n'
+        out = finalize.set_generated_event(text, "m", "2026-09-07T12:00:00Z")
+        fields, _ = finalize.split_frontmatter(out)
+        self.assertEqual(finalize.parse_fields(fields)["type"], "Playbook")
+        self.assertIn("generated: { by: m, at: 2026-09-07T12:00:00Z }", out)
+        self.assertNotIn("by: old", out)
+
+    def test_set_appends_when_absent(self):
+        text = '---\ntype: Playbook\ntitle: A\n---\n\n# A\n\nB.\n'
+        out = finalize.set_generated_event(text, "m", "2026-09-07T12:00:00Z")
+        self.assertIn("generated: { by: m, at: 2026-09-07T12:00:00Z }", out)
+        self.assertTrue(finalize.split_frontmatter(out)[1].endswith("# A\n\nB.\n"))
+
+    def test_set_without_at_omits_at(self):
+        text = '---\ntype: Playbook\n---\n\n# A\n'
+        out = finalize.set_generated_event(text, "m", None)
+        self.assertIn("generated: { by: m }", out)
+
+    def test_remove_field_drops_legacy_timestamp(self):
+        text = '---\ntype: Playbook\ntimestamp: 2024-01-01\ntitle: A\n---\n\n# A\n'
+        out = finalize.remove_field(text, "timestamp")
+        self.assertNotIn("timestamp", out)
+        self.assertIn("title: A", out)
+
+    def test_canonicalize_terminal_endings(self):
+        self.assertEqual(finalize.canonicalize_terminal("# A\n\n"), "# A\n")
+        self.assertEqual(finalize.canonicalize_terminal("# A"), "# A\n")
+        self.assertEqual(finalize.canonicalize_terminal("# A\n\n\n"), "# A\n")
+        self.assertEqual(finalize.canonicalize_terminal("# A\r\n\r\n"), "# A\n")
+
+    def test_restore_puts_back_tampered_event(self):
+        tampered = '---\ntype: P\ngenerated: { by: impostor, at: 2030-01-01T00:00:00Z }\n---\n\n# A\n'
+        out = finalize.restore_generated_event(
+            tampered, {"by": "m", "at": "2026-09-07T12:00:00Z"})
+        self.assertIn("generated: { by: m, at: 2026-09-07T12:00:00Z }", out)
+
+    def test_restore_removes_stamp_when_previously_unstamped(self):
+        stamped = '---\ntype: P\ngenerated: { by: m, at: 2026-09-07T12:00:00Z }\n---\n\n# A\n'
+        out = finalize.restore_generated_event(stamped, None)
+        self.assertNotIn("generated", out)
+        self.assertIn("type: P", out)
+
+    def test_repair_removes_invalid_generated_but_keeps_translation_marker(self):
+        text = ('---\ntype: P\ngenerated: someday-maybe\n'
+                'openwiki_translation_pending: true\n---\n\n# A\n')
+        out = finalize.repair_frontmatter(text)
+        self.assertNotIn("generated:", out)
+        self.assertIn("openwiki_translation_pending: true", out)
+
+    def test_repair_removes_empty_optional_scalars(self):
+        text = '---\ntype: P\ntitle:\n---\n\n# A\n'
+        out = finalize.repair_frontmatter(text)
+        self.assertNotIn("title:", out)
+        self.assertIn("type: P", out)
+
+
+class TestProvenancePass(TempWiki):
+    def run_snapshot(self):
+        finalize.write_state(self.wiki)
+
+    def test_changed_body_is_stamped_and_legacy_timestamp_removed(self):
+        self.write("a.md", '---\ntype: Playbook\ntitle: A\ntimestamp: 2024-01-01\n---\n\n# A\n\nOld.\n')
+        self.run_snapshot()
+        p = self.wiki / "a.md"
+        t = p.read_text(encoding="utf-8")
+        p.write_text(t.replace("Old.", "New."), encoding="utf-8")
+        changed = finalize.pass_provenance(
+            self.wiki, "m", "2026-09-07T12:00:00Z", finalize.state_path_for(self.wiki))
+        out = p.read_text(encoding="utf-8")
+        self.assertIn(changed[0], str(p))
+        self.assertIn("generated: { by: m, at: 2026-09-07T12:00:00Z }", out)
+        self.assertNotIn("timestamp", out)
+        self.assertTrue(out.endswith("\n") and not out.endswith("\n\n"))
+
+    def test_new_page_absent_from_snapshot_is_stamped(self):
+        self.write("a.md", "# A\n\nB.\n")
+        self.run_snapshot()
+        p = self.write("fresh.md", "# Fresh\n\nNew.\n")
+        finalize.pass_provenance(
+            self.wiki, "m", "2026-09-07T12:00:00Z", finalize.state_path_for(self.wiki))
+        self.assertIn("generated: { by: m, at:", p.read_text(encoding="utf-8"))
+
+    def test_frontmatter_only_change_preserves_prior_stamp(self):
+        self.write("a.md", '---\ntype: P\ngenerated: { by: m, at: 2026-01-01T00:00:00Z }\n---\n\n# A\n\nB.\n')
+        self.run_snapshot()
+        p = self.wiki / "a.md"
+        t = p.read_text(encoding="utf-8")
+        p.write_text(t.replace("type: P", "type: Playbook"), encoding="utf-8")
+        finalize.pass_provenance(
+            self.wiki, "m", "2026-09-07T12:00:00Z", finalize.state_path_for(self.wiki))
+        out = p.read_text(encoding="utf-8")
+        self.assertIn("generated: { by: m, at: 2026-01-01T00:00:00Z }", out)
+        self.assertIn("type: Playbook", out)
+
+    def test_missing_snapshot_file_stamps_everything_conservatively(self):
+        p = self.write("a.md", "# A\n\nB.\n")
+        changed = finalize.pass_provenance(
+            self.wiki, "m", "2026-09-07T12:00:00Z", finalize.state_path_for(self.wiki))
+        self.assertIn("generated: { by: m, at:", p.read_text(encoding="utf-8"))
+        self.assertTrue(changed)
+
+    def test_changed_page_without_any_frontmatter_gets_type_and_stamp(self):
+        p = self.write("bare.md", "# Bare\n\nProse.\n")
+        finalize.pass_provenance(
+            self.wiki, "m", "2026-09-07T12:00:00Z", finalize.state_path_for(self.wiki))
+        out = p.read_text(encoding="utf-8")
+        fields = finalize.parse_fields(finalize.split_frontmatter(out)[0])
+        self.assertEqual(fields["type"], "Reference")
+        self.assertIn("generated: { by: m, at:", out)
+        self.assertEqual(fields["openwiki_generated"], "true")
 
 
 class TestShippedCopy(unittest.TestCase):

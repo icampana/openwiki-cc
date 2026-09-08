@@ -12,8 +12,7 @@ natively for each host:
 
 - **Claude Code** — a slash-command plugin: `commands/wiki.md` → `/openwiki:wiki`.
 - **Codex** — a skill: `.agents/skills/openwiki/SKILL.md` → `$openwiki`.
-- **opencode** — the *same* skill file, which opencode also discovers, plus a thin
-  `.opencode/commands/wiki.md` that adds `init`/`update` slash arguments → `/wiki`.
+- **opencode** — the *same* skill file, which opencode also discovers.
 - **anything else** — the same skill via [skills](https://github.com/vercel-labs/skills):
   `npx skills add icampana/openwiki-cc`.
 
@@ -52,8 +51,7 @@ inside the skill folder, so every install path gets full behavior with no extra 
 before the script shipped? `npx skills update openwiki` refreshes your copy.
 
 Invocation is unchanged from the host sections below: `$openwiki`, or ask for "init / update the
-openwiki docs". On opencode you can additionally install the `/wiki` command for real slash
-arguments.
+openwiki docs".
 
 ## Install — Claude Code
 
@@ -118,22 +116,12 @@ implicitly when you ask to "initialize / update the openwiki docs".
 > `openwiki/` auto-detect) rather than an `init`/`update` token. Codex custom prompts
 > (`~/.codex/prompts/`) are deprecated, so this ships as a skill.
 
-**opencode.** The skill alone works — ask to "update the openwiki docs" and opencode loads it via
-the native `skill` tool. For a real `/wiki` that takes `init` and `update` as arguments, also
-install the command:
+**opencode.** The skill is the whole install — nothing else to copy. Ask to "update the openwiki
+docs" and opencode loads it through the native `skill` tool. Say "initialize" or "update" to force
+a mode; with neither, the skill auto-routes on whether `openwiki/` already exists.
 
-```bash
-# global → /wiki in every repo
-mkdir -p ~/.config/opencode/commands
-cp .opencode/commands/wiki.md ~/.config/opencode/commands/
-
-# or per-repo
-mkdir -p your-repo/.opencode/commands
-cp .opencode/commands/wiki.md your-repo/.opencode/commands/
-```
-
-The command holds no agent logic — it resolves the mode from `$ARGUMENTS` and hands off to the
-skill, so there is no third copy of the system prompt to keep in sync.
+> opencode loads skills by name and passes no arguments, so there is no `/wiki init` slash form.
+> The mode comes from your phrasing instead.
 
 > opencode has a **Task tool**, so it runs the parallel read-only subagents that Codex cannot.
 > The skill marks that section opencode-only; everything else is identical on both hosts.
@@ -154,9 +142,8 @@ skill, so there is no third copy of the system prompt to keep in sync.
 > can't be a bare `/openwiki` anyway; plugin commands are always namespaced). `init` and `update`
 > remain explicit.
 
-**opencode** — with the command installed, `/wiki`, `/wiki init`, `/wiki update`, and
-`/wiki update <instruction>` behave exactly like the Claude Code table above. Without it, invoke
-the skill by asking to "update the openwiki docs".
+**opencode** — ask to "update the openwiki docs". Same auto-detect and same forcing words as
+Codex below; any extra wording rides along as an additional instruction for the run.
 
 **Codex** — invoke `$openwiki` (or ask to "update the openwiki docs"). It auto-detects init
 (no `openwiki/`) vs update (`openwiki/` exists); say "initialize" or "update" to force a mode,
@@ -270,14 +257,43 @@ Copy the script under `.claude/hooks/` and wire it in `.claude/settings.json`:
   the frontier model on a real change.
 - Self-check: `sh hooks/test_gate.sh` (stubs `claude`; exercises every skip/run branch).
 
+### Codex and opencode
+
+**Codex** uses the same hook shape as Claude Code, so this repository ships the wiring in
+[`.codex/hooks.json`](.codex/hooks.json) — a `Stop` hook running `sh hooks/openwiki-gate.sh`.
+
+**opencode** has no JSON hook array. It fires events into JS/TS plugins, loaded automatically
+from `.opencode/plugins/` (project) and `~/.config/opencode/plugins/` (global). This repository
+ships [`.opencode/plugins/openwiki-gate.ts`](.opencode/plugins/openwiki-gate.ts), which listens
+for `session.idle` — opencode's counterpart to `Stop`.
+
+Both wirings run `hooks/openwiki-gate.sh` by a path relative to the project directory, so gate
+each repository the same way you would for Claude Code: copy the script in, then add the host's
+wiring beside it. A global opencode plugin on its own gates nothing, and the plugin calls the
+script with `.nothrow()`, so a missing script fails silently rather than erroring.
+
+Either way, change the spawn line: [`hooks/openwiki-gate.sh`](hooks/openwiki-gate.sh) hardcodes
+`claude -p`, so under another host swap the last line for its headless command.
+
+```sh
+OPENWIKI_HOOK=1 setsid codex exec '$openwiki update' >/dev/null 2>&1 &            # Codex
+OPENWIKI_HOOK=1 setsid opencode run 'update the openwiki docs' >/dev/null 2>&1 &  # opencode
+```
+
+Everything above still holds: the shell-level gate and the `OPENWIKI_HOOK` recursion guard.
+`sh hooks/test_gate.sh` stubs `claude`, so run it against the unmodified script — it doesn't
+cover a swapped spawn line.
+
 ## Fidelity to upstream
 
-**Tracked against upstream `v0.3.3`, repository output mode.** The reproduced surface is the
-`init` and `update` system prompts (`src/agent/prompts/code.ts` → `CODE_SYSTEM_PROMPTS`), the
-prompt assembly and link-integrity appendix (`src/agent/prompt.ts`), and the git evidence,
-no-op, snapshot and metadata logic (`src/agent/utils.ts`). Prompt text is extracted from upstream
-with [`scripts/extract-upstream-prompt.py`](scripts/extract-upstream-prompt.py) rather than
-retyped, so transcription drift is not possible.
+**Tracked against upstream `v0.5.0`, repository output mode.** The reproduced surface is the
+repository planner and per-page worker prompts (`src/agent/repository-prompts.ts`), the run
+lifecycle (`src/agent/index.ts`), the prepare/finalize harness (`src/agent/wiki-finalizer.ts`),
+link validation (`src/agent/wiki-link-validator.ts`), the git evidence, no-op, and metadata
+logic (`src/agent/utils.ts`), and the OKF machinery (`src/okf/frontmatter.ts`,
+`src/okf/index-sync.ts`, `src/okf/generated-provenance.ts`). Prompt text is extracted from
+upstream with [`scripts/extract-upstream-prompt.py`](scripts/extract-upstream-prompt.py)
+rather than retyped, so transcription drift is not possible.
 
 **Deliberately not covered**, and recorded as such in
 [`upstream.lock.json`](upstream.lock.json):
@@ -288,27 +304,34 @@ retyped, so transcription drift is not possible.
 | `CODE_SYSTEM_PROMPTS.chat` | Interactive chat. This port auto-routes between `init` and `update`; a plugin slash command is always namespaced. |
 | `--language` | No slash-command equivalent, so `language` is omitted from run metadata rather than faked. |
 | `translation-middleware.ts`, `skills.ts`, `crash-guard.ts`, `vertex-surface.ts`, `openai-chatgpt-oauth.ts` | Harness plumbing the host already provides. |
+| `src/claims/*`, `src/okf/claim-sources.ts`, `src/okf/claims-verification.ts` | Grounded claims with machine verification. A prompt-only port cannot provide a claims store or evidence resolvers, so workers write pages directly. |
+| `src/generation/*` | Durable resumable page jobs. The port runs in one session; update planning uses the last recorded `gitHead` as its only window. |
+| `src/mermaid/*` | Mermaid fence parse-validation. Python's standard library cannot parse mermaid, and the v0.5.0 repository prompts carry no diagram discipline to lose. |
+| `src/integrations/*` | Upstream's own coding-agent installer. This port *is* the alternative distribution. |
 
-**Outstanding.** Upstream's named subagents — `src/agent/skeleton_critic.ts`,
-`src/agent/wiki_qa_subagents.ts` (`wiki_question_finder`, `wiki_answer_verifier`) — were redirected
-to generic subagent briefs in this port rather than ported verbatim, because their actual system
-prompts live in upstream harness code that was not extracted here. Porting those prompts is
-tracked work, listed so it stays visible instead of silently missing. `src/agent/wiki-link-validator.ts`
-and the OKF work under `src/okf/` (`frontmatter.ts`, `index-sync.ts`, `index-labels.ts`), by
-contrast, are reproduced.
+**Removed upstream, removed here.** The `skeleton_critic.ts` and `wiki_qa_subagents.ts`
+subsystems that the v0.3.3 port adapted into critic/verifier subagent waves were deleted
+upstream in v0.5.0 along with the monolithic prompt. The per-page worker model replaces
+them; `src/agent/wiki-link-validator.ts`, previously reproduced but untracked, is now
+tracked in [`upstream.lock.json`](upstream.lock.json).
 
 ### OKF front matter
 
-From `v0.3.3`, every generated page carries YAML front matter following the Google Knowledge
-Catalog OKF v0.1 schema — `type` is required, `title` and `description` are recommended, and
+From `v0.5.0`, every generated page carries YAML front matter following the Google Knowledge
+Catalog OKF v0.2 schema — `type` is required, `title` and `description` are recommended, and
 producer-defined extension fields are valid and preserved across runs. `index.md`, `log.md`,
-`_plan.md`, and `_sidebar.md` are reserved and never receive it — `_sidebar.md` is a Docsify
-navigation partial, so front matter injected there renders as navigation, not metadata.
+`INSTRUCTIONS.md`, `_plan.md`, and `_sidebar.md` are reserved and never receive it.
+
+After every run the finalizer stamps each page whose **body** changed with
+`generated: { by: <model>, at: <timestamp> }` and removes the superseded legacy `timestamp`
+field; pages whose body did not change keep their prior stamp. The stamp is code-owned:
+workers must not author or edit it, and the finalizer restores it if a run tampers with it.
 
 If you already have an `openwiki/` from an earlier version, no migration step is needed. Front
 matter is additive, and [`scripts/openwiki-finalize.py`](scripts/openwiki-finalize.py) backfills
-it on the next run, tagging anything it inferred with `openwiki_generated: true` so a later run
-can replace the guess with a real description. Nothing is deleted.
+it on the next run (prepare mode, Step 2 of the command), tagging anything it inferred with
+`openwiki_generated: true` so a later run can replace the guess with a real description.
+Nothing is deleted.
 
 Two notes if you are upgrading a wiki that already exists:
 
@@ -366,15 +389,18 @@ commands/
   wiki.md            # Claude Code slash command (system prompt + git + idempotence)
 .agents/skills/
   openwiki/SKILL.md  # skill for Codex AND opencode (same agent, shell tool vocabulary)
-.opencode/commands/
-  wiki.md            # opencode /wiki — mode routing only; delegates to the skill
+  openwiki/scripts/openwiki-finalize.py  # byte-identical twin of scripts/, so the skill installs complete
+.codex/
+  hooks.json         # Codex Stop hook → the gate (this repo only)
+.opencode/
+  plugins/openwiki-gate.ts  # opencode session.idle plugin → the gate (this repo only)
 hooks/
   openwiki-gate.sh   # shell gate for hook-driven auto-run
   test_gate.sh       # self-check for the gate
 scripts/
   check-upstream-drift.sh  # re-hashes the upstream files this port reproduces
-  extract-upstream-prompt.py  # pulls prompt text from upstream, verbatim
-  openwiki-finalize.py     # Step 3b: OKF front matter, indexes, link integrity
+  extract-upstream-prompt.py  # pulls planner/worker prompt text from upstream, verbatim
+  openwiki-finalize.py     # Step 2 --snapshot (migrate + body-hash state), Step 3b finalize (indexes, links, generated provenance)
   test_finalize.py         # finalizer test suite
 upstream.lock.json   # the upstream ref + per-file SHA-256 the port is ported from
 .github/workflows/
@@ -387,10 +413,9 @@ The repo is both the Claude Code plugin and its marketplace, so
 `.agents/skills/` is copied to `~/.agents/skills/` (or a repo's `.agents/skills/`), where **both**
 Codex and opencode find it.
 
-There are two agent definitions, not three. `commands/wiki.md` is authoritative for Claude Code;
-`SKILL.md` carries the same verbatim OpenWiki system prompt, git commands, `.last-update.json`
-shape and idempotence logic for the shell-based hosts. The opencode command adds slash-argument
-routing and nothing else, so it never drifts from the skill.
+There are two agent definitions. `commands/wiki.md` is authoritative for Claude Code; `SKILL.md`
+carries the same verbatim OpenWiki system prompt, git commands, `.last-update.json` shape and
+idempotence logic for the shell-based hosts.
 
 The hosts differ in exactly one place — subagents:
 

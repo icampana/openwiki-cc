@@ -15,12 +15,18 @@ Two rules govern everything below:
    both the in-agent no-op check and hooks/openwiki-gate.sh.
 """
 import argparse
+import datetime
+import hashlib
+import json
 import pathlib
 import re
 import sys
 import urllib.parse
 
-RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md"}
+# Upstream EXCLUDED_FILES at v0.5.0 is {index.md, log.md, INSTRUCTIONS.md}.
+# _plan.md stays as legacy defense (this port's earlier versions wrote one);
+# _sidebar.md stays (OW-5: Docsify nav partial).
+RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md", "INSTRUCTIONS.md"}
 GENERATED_FIELD = "openwiki_generated"
 FALLBACK_TYPE = "Reference"
 
@@ -228,7 +234,7 @@ def pass_frontmatter(wiki):
     return changed
 
 
-ROOT_INDEX_FRONTMATTER = '---\nokf_version: "0.1"\n---\n\n'
+ROOT_INDEX_FRONTMATTER = '---\nokf_version: "0.2"\n---\n\n'
 
 
 def index_label(path):
@@ -525,9 +531,226 @@ def pass_links(wiki):
     return changed
 
 
+STATE_FILENAME = ".openwiki-run.json"
+
+
+def state_path_for(wiki):
+    """Repo-root provenance state: the directory holding the wiki, mirroring
+    upstream's `.run.json` beside the wiki rather than inside it."""
+    return wiki.resolve().parent / STATE_FILENAME
+
+
+_GENERATED_RE = re.compile(
+    r"^\s*generated:\s*\{\s*by:\s*(?P<by>[^,}]+?)\s*"
+    r"(?:,\s*at:\s*(?P<at>[^}]+?)\s*)?\}\s*$"
+)
+
+
+def read_generated_event(text):
+    """Parse a valid `generated: { by, at? }` flow mapping from front matter.
+
+    Returns a dict, or None when the page has no block or no valid mapping.
+    """
+    fields_text, _ = split_frontmatter(text)
+    if fields_text is None:
+        return None
+    for line in fields_text.splitlines():
+        m = _GENERATED_RE.match(line)
+        if m:
+            by = m.group("by").strip().strip("'\"")
+            at = (m.group("at") or "").strip().strip("'\"") or None
+            if by:
+                return {"by": by, "at": at} if at else {"by": by}
+    return None
+
+
+def _is_key_line(line, key):
+    """Whether a front-matter line assigns the top-level `key`."""
+    stripped = line.strip()
+    return (stripped == key or stripped.startswith(key + ":")
+            or stripped.startswith(key + " :"))
+
+
+def _split_fields(text):
+    """Return (newline, field_lines, body) for a document known to carry a
+    front matter block."""
+    fields_text, body = split_frontmatter(text)
+    newline = "\r\n" if "\r\n" in fields_text else "\n"
+    lines = fields_text.split(newline)
+    if lines and lines[-1] == "":
+        lines.pop()
+    return newline, lines, body
+
+
+def set_generated_event(text, by, at):
+    """Set or replace the `generated: { by, at }` flow mapping.
+
+    Upstream's exact rendering: a single-line flow mapping. Replaced in place,
+    appended at the end of the block when absent, so positions are stable.
+    """
+    line = ("generated: { by: %s }" % by if at is None
+            else "generated: { by: %s, at: %s }" % (by, at))
+    fields_text, body = split_frontmatter(text)
+    if fields_text is None:
+        # No block at all (migrate normally guarantees one); create minimal.
+        return "---\n%s\n---\n\n%s" % (line, body.lstrip("\r\n"))
+    newline, lines, body = _split_fields(text)
+    out = [line if _is_key_line(l, "generated") else l for l in lines]
+    if not any(_is_key_line(l, "generated") for l in lines):
+        out.append(line)
+    return "---" + newline + newline.join(out) + newline + "---" + newline + body
+
+
+def remove_field(text, key):
+    """Drop every top-level `key:` line from the front matter block."""
+    fields_text, _ = split_frontmatter(text)
+    if fields_text is None:
+        return text
+    newline, lines, body = _split_fields(text)
+    out = [l for l in lines if not _is_key_line(l, key)]
+    return "---" + newline + newline.join(out) + newline + "---" + newline + body
+
+
+def canonicalize_terminal(text):
+    """Upstream `canonicalizeChangedConcept`: changed pages end in exactly one
+    LF. Nothing else is touched."""
+    return re.sub(r"[\r\n]*\Z", "", text) + "\n"
+
+
+def restore_generated_event(text, prior):
+    """Unchanged body: put back the pre-run event when the agent removed or
+    altered it; remove any stamp when the page was previously unstamped."""
+    current = read_generated_event(text)
+    if prior is None:
+        return text if current is None else remove_field(text, "generated")
+    if (current and current.get("by") == prior.get("by")
+            and current.get("at") == prior.get("at")):
+        return text
+    return set_generated_event(text, prior["by"], prior.get("at"))
+
+
+def repair_frontmatter(text):
+    """Minimal OKF repair: drop an unparseable `generated` line and empty
+    optional scalars. `openwiki_translation_pending` — a code-managed marker —
+    is never touched."""
+    fields_text, _ = split_frontmatter(text)
+    if fields_text is None:
+        return text
+    newline, lines, body = _split_fields(text)
+    out = []
+    for line in lines:
+        key = line.split(":", 1)[0].strip() if ":" in line else None
+        if key == "generated" and not _GENERATED_RE.match(line):
+            continue
+        if (key in ("title", "description", "resource")
+                and not line.split(":", 1)[1].strip()):
+            continue
+        out.append(line)
+    return "---" + newline + newline.join(out) + newline + "---" + newline + body
+
+
+def body_hash(text):
+    """SHA-256 of the body excluding front matter, whitespace retained.
+
+    Any body change — including whitespace — advances the hash, so the
+    finalize pass stamps exactly the pages this run touched.
+    """
+    _, body = split_frontmatter(text)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def write_state(wiki):
+    """Migrate front matter, then snapshot per-page body hashes + prior
+    generated events. Overwrites any stale state file. Returns
+    (migrated_count, snapshot_count)."""
+    migrated = len(pass_frontmatter(wiki))
+    entries = []
+    for path in markdown_files(wiki):
+        if path.name in RESERVED:
+            continue
+        text = read_text_or_none(path)
+        if text is None:
+            continue
+        entry = {"page": path.relative_to(wiki).as_posix(),
+                 "bodyHash": body_hash(text)}
+        event = read_generated_event(text)
+        if event:
+            entry["generated"] = event
+        entries.append(entry)
+    entries.sort(key=lambda e: e["page"])
+    try:
+        with open(state_path_for(wiki), "w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=2)
+            f.write("\n")
+    except OSError as exc:
+        print("openwiki-finalize: could not write state (%s)" % exc)
+    return migrated, len(entries)
+
+
+def read_state(state_path):
+    """Load the snapshot entries, or None when the file is missing/corrupt.
+
+    A missing state file is conservative: the caller treats every page as
+    changed, matching upstream's migration behavior. It self-corrects on the
+    next run, which writes a fresh snapshot first.
+    """
+    try:
+        with open(state_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, list) else None
+
+
+def delete_state(state_path):
+    try:
+        state_path.unlink()
+    except OSError:
+        pass
+
+
+def utc_now():
+    """One shared run timestamp, UTC ISO 8601 with seconds, matching the
+    `at` shape upstream writes (explicit UTC designator, no microseconds)."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def pass_provenance(wiki, actor, at, state_path):
+    """Stamp generated provenance per the snapshot. Runs LAST, after index
+    sync and link validation, exactly like upstream's `generated_provenance`
+    operation. Skips reserved files and unreadable pages, never failing."""
+    snapshot = read_state(state_path)
+    entries = {e["page"]: e for e in snapshot} if snapshot is not None else None
+    changed = []
+    for path in markdown_files(wiki):
+        if path.name in RESERVED:
+            continue
+        text = read_text_or_none(path)
+        if text is None:
+            continue
+        rel = path.relative_to(wiki).as_posix()
+        prior = entries.get(rel) if entries is not None else None
+        body_changed = prior is None or prior.get("bodyHash") != body_hash(text)
+        if body_changed:
+            if split_frontmatter(text)[0] is None:
+                text = ensure_frontmatter(text, path.stem.replace("-", " ").title())
+            candidate = canonicalize_terminal(
+                remove_field(set_generated_event(text, actor, at), "timestamp"))
+        else:
+            candidate = restore_generated_event(text, prior.get("generated"))
+        updated = repair_frontmatter(candidate)
+        if updated != text and write_text_or_skip(path, updated):
+            changed.append(str(path))
+    return changed
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("wiki", nargs="?", default="openwiki")
+    ap.add_argument("--snapshot", action="store_true",
+                    help="prepare mode: migrate front matter, then write the provenance state file")
+    ap.add_argument("--actor", default="openwiki-cc",
+                    help="producer recorded in `generated` events (the command passes the running model id)")
     args = ap.parse_args()
 
     wiki = pathlib.Path(args.wiki)
@@ -535,12 +758,23 @@ def main():
         print("openwiki-finalize: no such directory: %s (nothing to do)" % wiki)
         return 0
 
-    fm = pass_frontmatter(wiki)
+    if args.snapshot:
+        fm, pages = write_state(wiki)
+        print("openwiki-finalize: migrated %d file(s), snapshot %d page(s)" % (fm, pages))
+        return 0
+
+    # Sanitize the actor: it is interpolated into front-matter lines, so a
+    # newline-bearing value would inject lines. Strip it; an empty result
+    # falls back to the default so the stamp always names a producer.
+    actor = (args.actor or "").strip() or "openwiki-cc"
+
     idx = pass_indexes(wiki)
     lnk = pass_links(wiki)
-    print("openwiki-finalize: front matter %d, indexes %d, links %d"
-          % (len(fm), len(idx), len(lnk)))
-    for path in fm + idx + lnk:
+    prov = pass_provenance(wiki, actor, utc_now(), state_path_for(wiki))
+    delete_state(state_path_for(wiki))
+    print("openwiki-finalize: indexes %d, links %d, provenance %d"
+          % (len(idx), len(lnk), len(prov)))
+    for path in idx + lnk + prov:
         print("  + %s" % path)
     return 0
 
