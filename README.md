@@ -12,8 +12,7 @@ natively for each host:
 
 - **Claude Code** — a slash-command plugin: `commands/wiki.md` → `/openwiki:wiki`.
 - **Codex** — a skill: `.agents/skills/openwiki/SKILL.md` → `$openwiki`.
-- **opencode** — the *same* skill file, which opencode also discovers, plus a thin
-  `.opencode/commands/wiki.md` that adds `init`/`update` slash arguments → `/wiki`.
+- **opencode** — the *same* skill file, which opencode also discovers.
 - **anything else** — the same skill via [skills](https://github.com/vercel-labs/skills):
   `npx skills add icampana/openwiki-cc`.
 
@@ -118,22 +117,12 @@ implicitly when you ask to "initialize / update the openwiki docs".
 > `openwiki/` auto-detect) rather than an `init`/`update` token. Codex custom prompts
 > (`~/.codex/prompts/`) are deprecated, so this ships as a skill.
 
-**opencode.** The skill alone works — ask to "update the openwiki docs" and opencode loads it via
-the native `skill` tool. For a real `/wiki` that takes `init` and `update` as arguments, also
-install the command:
+**opencode.** The skill is the whole install — nothing else to copy. Ask to "update the openwiki
+docs" and opencode loads it through the native `skill` tool. Say "initialize" or "update" to force
+a mode; with neither, the skill auto-routes on whether `openwiki/` already exists.
 
-```bash
-# global → /wiki in every repo
-mkdir -p ~/.config/opencode/commands
-cp .opencode/commands/wiki.md ~/.config/opencode/commands/
-
-# or per-repo
-mkdir -p your-repo/.opencode/commands
-cp .opencode/commands/wiki.md your-repo/.opencode/commands/
-```
-
-The command holds no agent logic — it resolves the mode from `$ARGUMENTS` and hands off to the
-skill, so there is no third copy of the system prompt to keep in sync.
+> opencode loads skills by name and passes no arguments, so there is no `/wiki init` slash form.
+> The mode comes from your phrasing instead.
 
 > opencode has a **Task tool**, so it runs the parallel read-only subagents that Codex cannot.
 > The skill marks that section opencode-only; everything else is identical on both hosts.
@@ -154,9 +143,8 @@ skill, so there is no third copy of the system prompt to keep in sync.
 > can't be a bare `/openwiki` anyway; plugin commands are always namespaced). `init` and `update`
 > remain explicit.
 
-**opencode** — with the command installed, `/wiki`, `/wiki init`, `/wiki update`, and
-`/wiki update <instruction>` behave exactly like the Claude Code table above. Without it, invoke
-the skill by asking to "update the openwiki docs".
+**opencode** — ask to "update the openwiki docs". Same auto-detect and same forcing words as
+Codex below; any extra wording rides along as an additional instruction for the run.
 
 **Codex** — invoke `$openwiki` (or ask to "update the openwiki docs"). It auto-detects init
 (no `openwiki/`) vs update (`openwiki/` exists); say "initialize" or "update" to force a mode,
@@ -399,8 +387,6 @@ commands/
   wiki.md            # Claude Code slash command (system prompt + git + idempotence)
 .agents/skills/
   openwiki/SKILL.md  # skill for Codex AND opencode (same agent, shell tool vocabulary)
-.opencode/commands/
-  wiki.md            # opencode /wiki — mode routing only; delegates to the skill
 hooks/
   openwiki-gate.sh   # shell gate for hook-driven auto-run
   test_gate.sh       # self-check for the gate
@@ -420,10 +406,9 @@ The repo is both the Claude Code plugin and its marketplace, so
 `.agents/skills/` is copied to `~/.agents/skills/` (or a repo's `.agents/skills/`), where **both**
 Codex and opencode find it.
 
-There are two agent definitions, not three. `commands/wiki.md` is authoritative for Claude Code;
-`SKILL.md` carries the same verbatim OpenWiki system prompt, git commands, `.last-update.json`
-shape and idempotence logic for the shell-based hosts. The opencode command adds slash-argument
-routing and nothing else, so it never drifts from the skill.
+There are two agent definitions. `commands/wiki.md` is authoritative for Claude Code; `SKILL.md`
+carries the same verbatim OpenWiki system prompt, git commands, `.last-update.json` shape and
+idempotence logic for the shell-based hosts.
 
 The hosts differ in exactly one place — subagents:
 

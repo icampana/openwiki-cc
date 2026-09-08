@@ -26,7 +26,6 @@ deliverable is the agent definition itself, expressed as prompt files.
 |---|---|
 | [`commands/wiki.md`](../commands/wiki.md) | The Claude Code slash command → `/openwiki:wiki`. Contains the full routing, the six-step lifecycle (Steps 0, 1, 2, 3, 3b, 4), and the verbatim upstream planner + per-page-worker prompts. **This is the canonical agent definition.** |
 | [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) | The same agent for the shell-based hosts — **Codex** (`$openwiki`) and **opencode**, which both discover `.agents/skills/`. Same planner/worker prompts and lifecycle; the per-page-worker dispatch section is host-conditional (one subagent per page where the host has a subagent tool, sequential writing under the same worker discipline on Codex). |
-| [`.opencode/commands/wiki.md`](../.opencode/commands/wiki.md) | opencode's `/wiki`. Mode routing from `$ARGUMENTS` only — it delegates to the skill rather than restating the prompt. |
 | [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json), [`marketplace.json`](../.claude-plugin/marketplace.json) | Packaging so Claude Code can install the command as a plugin from a marketplace. |
 | [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh) | Optional shell gate for auto-running the wiki from a Claude Code `Stop`/`SessionEnd` hook — spawns the frontier model only when source actually changed. |
 | [`hooks/test_gate.sh`](../hooks/test_gate.sh) | Self-check for the gate's skip/run decisions. |
@@ -64,8 +63,8 @@ bare `/openwiki`. Copying `commands/wiki.md` into `.claude/commands/` instead gi
 
 **Codex and opencode (skill):** copy `.agents/skills/openwiki/` into `~/.agents/skills/` (or a
 repo's `.agents/skills/`) — both hosts read that path — then restart the host. Invoke `$openwiki`
-on Codex, or ask either host to "update the openwiki docs". For a real `/wiki` with `init`/`update`
-arguments on opencode, also copy `.opencode/commands/wiki.md` into `~/.config/opencode/commands/`.
+on Codex, or ask either host to "update the openwiki docs". Nothing else needs copying: the skill
+folder is the entire install on both hosts.
 
 Full install variants (per-project vs global, both hosts) are in the [README](../README.md).
 
@@ -107,7 +106,7 @@ Documentation quality depends directly on the model — a small/fast tier produc
 
 - **Behavior of the agent** → edit [`commands/wiki.md`](../commands/wiki.md), then mirror any
   semantic change into [`SKILL.md`](../.agents/skills/openwiki/SKILL.md). There are only these two
-  definitions; `.opencode/commands/wiki.md` carries no agent logic, so it does not need mirroring. Keep the reproduced
+  definitions. Keep the reproduced
   system prompt faithful to upstream; mark harness adaptations explicitly (upstream marks them
   `[adapted]`).
 - **Packaging / version** → [`plugin.json`](../.claude-plugin/plugin.json) (bump `version`) and

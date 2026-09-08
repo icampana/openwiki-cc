@@ -18,12 +18,12 @@ Start at [quickstart.md](quickstart.md) if you haven't; this page is the deep di
 
 The agent is written twice, not three times. Codex and opencode both discover
 `.agents/skills/<name>/SKILL.md`, so one skill file serves both; opencode additionally gets a thin
-command for slash arguments, which holds no agent logic.
+definition per host family, with no agent logic duplicated between them.
 
-| | Claude Code — [`commands/wiki.md`](../commands/wiki.md) | opencode — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) + [`.opencode/commands/wiki.md`](../.opencode/commands/wiki.md) | Codex — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) |
+| | Claude Code — [`commands/wiki.md`](../commands/wiki.md) | opencode — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) | Codex — [`SKILL.md`](../.agents/skills/openwiki/SKILL.md) |
 |---|---|---|---|
-| Trigger | `/openwiki:wiki [init\|update] [instruction]` | `/wiki [init\|update] [instruction]`, or ask in natural language | `$openwiki` (or natural-language "update the openwiki docs") |
-| Mode input | explicit token, else auto-route | explicit token via `$ARGUMENTS`, else auto-route | phrasing, else `openwiki/` auto-detect (no slash args) |
+| Trigger | `/openwiki:wiki [init\|update] [instruction]` | natural language ("update the openwiki docs"), via the native `skill` tool | `$openwiki` (or natural-language "update the openwiki docs") |
+| Mode input | explicit token, else auto-route | phrasing, else `openwiki/` auto-detect (no slash args) | phrasing, else `openwiki/` auto-detect (no slash args) |
 | Page writing | one **subagent per planned page** (Task tool), each own context window | same — opencode has a subagent tool | orchestrator writes pages one at a time under the same worker discipline (no subagent tool) |
 | Filesystem | native Read/Write/Edit/Glob/Grep/Bash on real repo paths | host-native shell + edit tools | same, `apply_patch` for writes |
 
