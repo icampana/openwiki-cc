@@ -1,7 +1,7 @@
 {
   "name": "openwiki",
   "description": "Generate and maintain an openwiki/ documentation wiki (init | update) for any repository — a port of langchain-ai/openwiki for Claude Code, Codex, and opencode.",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "author": {
     "name": "Iván Campaña"
   },
