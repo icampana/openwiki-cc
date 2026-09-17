@@ -1,7 +1,7 @@
 {
-  "updatedAt": "2026-09-07T23:24:40.000Z",
+  "updatedAt": "2026-09-17T16:27:17.000Z",
   "command": "update",
-  "gitHead": "57376d3a50b082efaf52e52b39a976bb38218426",
-  "model": "muse-spark",
+  "gitHead": "8a19c6280a493a5c1c87d90d90f627c327f2b74f",
+  "model": "claude-opus-5",
   "status": "complete"
 }

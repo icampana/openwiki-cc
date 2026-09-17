@@ -3,7 +3,7 @@ type: Entrypoint
 title: openwiki-cc — quickstart
 description: Entry point to the openwiki-cc wiki — a native Claude Code, Codex, and opencode port of langchain-ai/openwiki that generates and maintains an openwiki/ documentation wiki for a target repository.
 tags: [openwiki-cc, agent-port]
-generated: { by: muse-spark, at: 2026-09-07T23:24:26Z }
+generated: { by: claude-opus-5, at: 2026-09-17T16:26:58Z }
 ---
 
 # openwiki-cc — quickstart
@@ -25,6 +25,8 @@ deliverable is the agent definition itself, expressed as prompt files.
 | Path | Role |
 |---|---|
 | [`commands/wiki.md`](../commands/wiki.md) | The Claude Code slash command → `/openwiki:wiki`. Contains the full routing, the six-step lifecycle (Steps 0, 1, 2, 3, 3b, 4), and the verbatim upstream planner + per-page-worker prompts. **This is the canonical agent definition.** |
+| [`commands/observe.md`](../commands/observe.md) | `/openwiki:observe` — appends one skill-worthy pattern candidate to `openwiki/experience/`. Excluded from every finalizer pass; never triggers a wiki run. |
+| [`commands/distill.md`](../commands/distill.md) | `/openwiki:distill` — reads `openwiki/experience/candidates/`, groups recurring patterns against `openwiki/experience/decisions.md`, and proposes skills for a person to approve. |
 | [`.agents/skills/openwiki/SKILL.md`](../.agents/skills/openwiki/SKILL.md) | The same agent for the shell-based hosts — **Codex** (`$openwiki`) and **opencode**, which both discover `.agents/skills/`. Same planner/worker prompts and lifecycle; the per-page-worker dispatch section is host-conditional (one subagent per page where the host has a subagent tool, sequential writing under the same worker discipline on Codex). |
 | [`.claude-plugin/plugin.json`](../.claude-plugin/plugin.json), [`marketplace.json`](../.claude-plugin/marketplace.json) | Packaging so Claude Code can install the command as a plugin from a marketplace. |
 | [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh) | Optional shell gate for auto-running the wiki from a session-end hook on any of the three hosts — Claude Code `Stop`/`SessionEnd`, Codex `Stop` ([`.codex/hooks.json`](../.codex/hooks.json)), opencode `session.idle` ([`.opencode/plugins/openwiki-gate.ts`](../.opencode/plugins/openwiki-gate.ts)). Spawns the frontier model only when source actually changed. |
@@ -73,7 +75,7 @@ install it into opencode, Claude Code, Codex, Cursor, and 70+ more agents from o
 Step 3b finalizer ships inside the skill folder, so installs are complete out of the box; details
 in [Install — any agent](../README.md#install--any-agent-one-command).
 
-## The three commands
+## The four commands
 
 | Invocation | Behavior |
 |---|---|
@@ -81,11 +83,15 @@ in [Install — any agent](../README.md#install--any-agent-one-command).
 | `/openwiki:wiki init` | Build the wiki from scratch (≤ 8 pages; 1–2 for a small repo). |
 | `/openwiki:wiki update` | Surgically refresh only pages affected by changes since the last run. |
 | `/openwiki:wiki update <instruction>` | Same, plus an extra instruction appended to the run. |
+| `/openwiki:observe [what you observed]` | Append one candidate pattern to `openwiki/experience/`, in-session or from a `wiki` worker's reported friction. Never triggers a wiki run. |
+| `/openwiki:distill [slug]` | Read `openwiki/experience/candidates/`, group recurring patterns, and propose skills for a person to approve and write. |
 
 `init` vs `update` is the core distinction: **init** builds structure from scratch; **update** is
 deliberately conservative — it diffs against the last run and edits only what the changes touched,
-and it can legitimately be a **no-op** when nothing relevant changed. See
-[architecture.md](architecture.md) for how a run actually executes.
+and it can legitimately be a **no-op** when nothing relevant changed. `observe` and `distill` are a
+separate track: they write to the [experience layer](experience-layer.md), which every wiki pass
+excludes, so nothing there is ever regenerated. See [architecture.md](architecture.md) for how a
+wiki run actually executes.
 
 ## Model tier — do not run this small
 
@@ -99,6 +105,9 @@ Documentation quality depends directly on the model — a small/fast tier produc
 - **[architecture.md](architecture.md)** — how a run executes end-to-end: the two host ports, the
   routing + six-step lifecycle (no-op check → git evidence → snapshot → planner/workers →
   finalize → metadata), idempotence, per-page workers, root-file wiring, and the hook-based auto-run with its shell gate.
+- **[experience-layer.md](experience-layer.md)** — the accumulating `openwiki/experience/` subtree
+  that `/openwiki:observe` writes and `/openwiki:distill` proposes skills from, and why it is
+  exempt from every wiki generation pass.
 - **[Fidelity to upstream](../README.md#fidelity-to-upstream)** — what is verbatim from OpenWiki's
   source vs adapted for these harnesses, and why.
 
