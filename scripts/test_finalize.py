@@ -1121,6 +1121,22 @@ class TestShippedCopy(unittest.TestCase):
                 self.assertTrue(shipped.exists(), "missing shipped copy: %s" % shipped)
                 self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
 
+    def test_every_command_except_wiki_has_a_shipped_twin(self):
+        """SHIPPED_PAIRS is hand-maintained, so a new commands/foo.md with no
+        twin entry would pass every other test in this suite silently.
+        commands/wiki.md is excluded: its counterpart is SKILL.md, an
+        adapted port already covered by DOC_PAIR, not a byte-identical twin.
+        """
+        repo = pathlib.Path(__file__).parent.parent
+        shipped_names = {pathlib.Path(c).name for c, _ in self.SHIPPED_PAIRS
+                          if c.startswith("commands/")}
+        command_files = {p.name for p in (repo / "commands").glob("*.md")}
+        command_files.discard("wiki.md")
+        self.assertEqual(
+            command_files, shipped_names,
+            "commands/ has files with no entry in SHIPPED_PAIRS: %s"
+            % (command_files - shipped_names))
+
 
 DOC_PAIR = ("commands/wiki.md", ".agents/skills/openwiki/SKILL.md")
 

@@ -9,17 +9,22 @@ sessions:
 
 ## Evidence
 
-`scripts/openwiki-finalize.py:29` — `RESERVED = {"index.md", "log.md", "_plan.md",
-"_sidebar.md", "INSTRUCTIONS.md"}`. It is checked as `path.name in RESERVED` (e.g.
-`scripts/openwiki-finalize.py:236`, inside `pass_frontmatter`, and again at lines 277,
-310, 681, 738) — a check against a file's basename, run on paths already yielded by
+`RESERVED`, a module-level constant in `scripts/openwiki-finalize.py`: `RESERVED =
+{"index.md", "log.md", "_plan.md", "_sidebar.md", "INSTRUCTIONS.md"}`. It is checked
+as `path.name in RESERVED` in five places — the function `pass_frontmatter` (`if
+path.name in RESERVED:`), the function `_has_real_markdown` (`... and child.name not
+in RESERVED:`), the function `render_index` (`elif child.suffix == ".md" and
+child.name not in RESERVED:`), the function `write_state` (`if path.name in
+RESERVED:`), and the function `pass_provenance` (`if path.name in RESERVED:`) — a
+check against a file's basename, run on paths already yielded by
 `markdown_files`/`_iter_dirs`. `RESERVED` never gates which directories get walked in
-the first place; the actual directory gate is `_iter_dirs` (`scripts/openwiki-finalize.py:193`),
-which recurses into every real (non-symlinked) child directory whose name is not in
-`EXCLUDED_DIRS` (`scripts/openwiki-finalize.py:41`, checked at line 214). All four
-finalizer passes (`pass_frontmatter`, `pass_indexes`, `pass_links`, `pass_provenance`)
-reach the filesystem through `_iter_dirs`, so `EXCLUDED_DIRS` is the
-single seam that makes a whole subtree invisible.
+the first place; the actual directory gate is the function `_iter_dirs` (`if
+is_real_dir and child.name not in EXCLUDED_DIRS:`), which recurses into every real
+(non-symlinked) child directory whose name is not in `EXCLUDED_DIRS`, another
+module-level constant (`EXCLUDED_DIRS = {"experience"}`). All four finalizer passes
+(`pass_frontmatter`, `pass_indexes`, `pass_links`, `pass_provenance`) reach the
+filesystem through `_iter_dirs`, so `EXCLUDED_DIRS` is the single seam that makes a
+whole subtree invisible.
 
 ## Friction
 

@@ -47,7 +47,11 @@ git --no-pager diff --name-only <gitHead>..HEAD   # only if HEAD != gitHead
 ```
 
 Skip the model work when **all** hold:
-- `status --short` is empty after removing any line whose path is `openwiki/.last-update.json`;
+- `status --short` is empty after removing any line whose path is
+  `openwiki/.last-update.json` or under `openwiki/experience/` (**[adapted]** — that
+  subtree is accumulated by `/openwiki:observe`, not derived from repository evidence,
+  so an uncommitted observation is not a reason to run the model; upstream OpenWiki has
+  no such subtree, so `getUpdateNoopStatus` only ever excused its own metadata file);
 - HEAD == `gitHead`, **or** every path in `<gitHead>..HEAD` is under `openwiki/`.
 
 If skipped: refresh the run timestamp so freshness checks reflect the actual last run

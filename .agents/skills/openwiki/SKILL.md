@@ -24,11 +24,24 @@ to the Claude Code port in `commands/wiki.md`, which stays authoritative when th
 - Any extra instruction the user gives (e.g. "document the API routes first") is an additional
   instruction appended to the run.
 - The user asks to **record / observe / capture** a pattern worth a skill →
-  **observe mode**: follow `commands/observe.md`, shipped next to this file at
-  `.agents/skills/openwiki/commands/observe.md`, which is authoritative for that mode.
+  **observe mode**: follow `commands/observe.md`, which ships next to this file and is
+  authoritative for that mode. The working directory is the *target* repository, not
+  this skill's own install location, so locate it with the same kind of probe Step 2
+  uses for the finalizer, trying each candidate in order and stopping at the first
+  that exists:
+
+  ```bash
+  for c in .agents/skills/openwiki/commands/observe.md \
+           .claude/skills/openwiki/commands/observe.md \
+           "$HOME/.agents/skills/openwiki/commands/observe.md" \
+           "$HOME/.claude/skills/openwiki/commands/observe.md"; do
+    [ -f "$c" ] && { echo "$c"; break; }
+  done
+  ```
+
 - The user asks to **distill / promote** patterns into skills → **distill mode**:
-  follow `commands/distill.md`, shipped next to this file at
-  `.agents/skills/openwiki/commands/distill.md`, which is authoritative for that mode.
+  same probe, substituting `distill.md` for `observe.md`; the result is authoritative
+  for that mode.
 
 ## Model tier
 
@@ -62,7 +75,11 @@ git --no-pager diff --name-only <gitHead>..HEAD   # only if HEAD != gitHead
 ```
 
 Skip the model work when **all** hold:
-- `status --short` is empty after removing any line whose path is `openwiki/.last-update.json`;
+- `status --short` is empty after removing any line whose path is
+  `openwiki/.last-update.json` or under `openwiki/experience/` (**[adapted]** — that
+  subtree is accumulated by `/openwiki:observe`, not derived from repository evidence,
+  so an uncommitted observation is not a reason to run the model; upstream OpenWiki has
+  no such subtree, so `getUpdateNoopStatus` only ever excused its own metadata file);
 - HEAD == `gitHead`, **or** every path in `<gitHead>..HEAD` is under `openwiki/`.
 
 If skipped: refresh the run timestamp so freshness checks reflect the actual last run

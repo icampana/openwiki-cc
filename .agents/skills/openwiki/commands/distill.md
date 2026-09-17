@@ -28,7 +28,9 @@ so recurrence and evidence stand in for it, and a human makes the call.
    `decided` key (see step 7) — that key means this exact candidate was
    already ruled on, independent of what `decisions.md` says, so it counts
    toward nothing. Then count distinct entries across the remaining members'
-   `sessions` list.
+   `sessions` list — each entry is a real session identifier per
+   `/openwiki:observe`'s one-entry-per-session rule, so counting them is counting
+   sessions, not edits.
    - **Two or more distinct sessions** → propose.
    - **One session** → leave it as a candidate. Do not propose it, and do not
      delete it. A pattern seen once is an anecdote.

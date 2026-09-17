@@ -83,7 +83,7 @@ in [Install — any agent](../README.md#install--any-agent-one-command).
 | `/openwiki:wiki init` | Build the wiki from scratch (≤ 8 pages; 1–2 for a small repo). |
 | `/openwiki:wiki update` | Surgically refresh only pages affected by changes since the last run. |
 | `/openwiki:wiki update <instruction>` | Same, plus an extra instruction appended to the run. |
-| `/openwiki:observe [what you observed]` | Append one candidate pattern to `openwiki/experience/`, in-session or from a `wiki` worker's reported friction. Never triggers a wiki run. |
+| `/openwiki:observe [what you observed]` | Append one candidate pattern to `openwiki/experience/`, in-session only. Never triggers a wiki run. |
 | `/openwiki:distill [slug]` | Read `openwiki/experience/candidates/`, group recurring patterns, and propose skills for a person to approve and write. |
 
 `init` vs `update` is the core distinction: **init** builds structure from scratch; **update** is

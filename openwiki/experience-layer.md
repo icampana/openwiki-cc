@@ -149,7 +149,9 @@ judge relevance without opening the page — the format is taken from WikiSkill 
 its stated purpose is the same.
 
 **`candidates/<slug>.md`** carries front matter keys `slug`, `trigger` (what was being attempted
-when this surfaced), and `sessions` (an append-only list of run identifiers), then three
+when this surfaced), and `sessions` (an append-only list of the agent host's own session or
+conversation identifiers — never a git SHA or an ISO date, both of which can repeat within one
+sitting and would defeat the two-session recurrence gate below), then three
 headings: `## Evidence`, `## Friction`, `## Would have changed`. The slug is kebab-case and
 names **the problem, not the fix**.
 
@@ -180,9 +182,13 @@ only `${job.path}`. Do not create, edit, or delete another wiki page."
 
 Its rules, in order of how often they matter:
 
-- **Evidence or refusal.** Every candidate carries a `file:line`, a command and its observed
-  output, or a commit SHA. An entry with no evidence is refused, not filed. A recollection is not
-  evidence, and paraphrasing output you did not run is not evidence.
+- **Evidence or refusal.** Every candidate carries a code citation naming the symbol —
+  function, constant, or class — and quoting the line (a `file:line` is an optional
+  convenience, never the citation's identity, because this subtree is never
+  regenerated and a bare line number decays silently as the file around it changes),
+  or a command and its observed output, or a commit SHA. An entry with no evidence is
+  refused, not filed. A recollection is not evidence, and paraphrasing output you did
+  not run is not evidence.
 - **Read `decisions.md` first.** A pattern already rejected there is not re-filed.
 - **No duplicates.** If an existing candidate covers the pattern, append the session identifier
   to that candidate's `sessions` list instead of creating a second page.
@@ -211,7 +217,8 @@ pass nothing to prune against.
 
 This port has no score. Two cheaper constraints stand in:
 
-1. **Every entry carries evidence** — `file:line`, a command and its observed output, or a commit.
+1. **Every entry carries evidence** — a symbol name with a quoted line (`file:line`
+   optional), a command and its observed output, or a commit.
 2. **Promotion requires recurrence** — two or more independent sessions before a proposal.
 
 Say it plainly: **both are weaker than a benchmark.** Evidence proves an entry is about something
