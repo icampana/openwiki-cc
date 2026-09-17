@@ -191,7 +191,10 @@ Its rules, in order of how often they matter:
   not run is not evidence.
 - **Read `decisions.md` first.** A pattern already rejected there is not re-filed.
 - **No duplicates.** If an existing candidate covers the pattern, append the session identifier
-  to that candidate's `sessions` list instead of creating a second page.
+  to that candidate's `sessions` list instead of creating a second page — unless that identifier
+  is already the last entry (the same sitting, so nothing changes), or the candidate carries a
+  `decided:` key, in which case the pattern has already been ruled on and a fresh candidate is
+  filed instead.
 - **Write nowhere else**, propose no skill, and file no working-style observation that would hold
   in any repository — those belong in engram's personal scope, not in this repository's wiki.
 
