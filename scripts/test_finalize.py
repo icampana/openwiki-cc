@@ -240,6 +240,59 @@ class TestIndexes(TempWiki):
         self.assertIn("(foo%281%29.md)", out)
         self.assertIn("(has%20space.md)", out)
 
+
+class TestExcludedDirs(TempWiki):
+    """openwiki/experience/ accumulates across runs instead of being regenerated,
+    so every finalizer pass must treat it as invisible."""
+
+    def seed(self):
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("experience/index.md", "# Experience\n\n- [a](candidates/a.md): P + C + F\n")
+        self.write("experience/decisions.md", "# Decisions\n\nNothing yet.\n")
+        return self.write(
+            "experience/candidates/a.md",
+            "# Seed paths missed the gate hook\n\nSee [b](missing.md).\n",
+        )
+
+    def test_no_frontmatter_is_backfilled_under_an_excluded_dir(self):
+        p = self.seed()
+        original = p.read_text(encoding="utf-8")
+        finalize.pass_frontmatter(self.wiki)
+        self.assertEqual(p.read_text(encoding="utf-8"), original)
+
+    def test_no_index_is_written_inside_an_excluded_dir(self):
+        self.seed()
+        finalize.pass_indexes(self.wiki)
+        target = self.wiki / "experience" / "candidates" / "index.md"
+        self.assertFalse(target.exists(), "wrote an index into the experience layer")
+
+    def test_root_index_does_not_link_an_excluded_dir(self):
+        self.seed()
+        finalize.pass_indexes(self.wiki)
+        root = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertIn("quickstart.md", root)
+        self.assertNotIn("experience", root)
+
+    def test_authored_experience_index_is_left_byte_identical(self):
+        self.seed()
+        p = self.wiki / "experience" / "index.md"
+        original = p.read_text(encoding="utf-8")
+        finalize.pass_indexes(self.wiki)
+        self.assertEqual(p.read_text(encoding="utf-8"), original)
+
+    def test_broken_links_under_an_excluded_dir_are_not_annotated(self):
+        p = self.seed()
+        finalize.pass_links(self.wiki)
+        self.assertNotIn("openwiki: broken internal link", p.read_text(encoding="utf-8"))
+
+    def test_no_provenance_stamp_lands_under_an_excluded_dir(self):
+        p = self.seed()
+        state = finalize.state_path_for(self.wiki)
+        finalize.write_state(self.wiki)
+        finalize.pass_provenance(self.wiki, "test-actor", "2026-09-17T00:00:00.000Z", state)
+        self.assertNotIn("generated:", p.read_text(encoding="utf-8"))
+
+
 MARKER = "openwiki: broken internal link"
 
 
@@ -598,6 +651,18 @@ class TestIdempotence(TempWiki):
         after_one = self.snapshot()
         state = self.tmp / ".openwiki-run.json"
         self.assertFalse(state.exists(), "finalize mode must consume the state file")
+        self.full_run()
+        self.assertEqual(self.snapshot(), after_one)
+
+    def test_a_populated_experience_layer_stays_byte_identical(self):
+        self.write("quickstart.md", "# Quickstart\n\nStart. See [arch](arch/overview.md).\n")
+        self.write("arch/overview.md", "# Overview\n\nBody.\n")
+        self.write("experience/index.md", "# Experience\n\n- [a](candidates/a.md): P + C + F\n")
+        self.write("experience/decisions.md", "# Decisions\n\nNothing yet.\n")
+        self.write("experience/candidates/a.md", "# A\n\nSee [gone](nope.md).\n")
+
+        self.full_run()
+        after_one = self.snapshot()
         self.full_run()
         self.assertEqual(self.snapshot(), after_one)
 

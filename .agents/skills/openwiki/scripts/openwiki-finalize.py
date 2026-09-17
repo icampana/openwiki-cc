@@ -30,6 +30,16 @@ RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md", "INSTRUCTIONS.md"}
 GENERATED_FIELD = "openwiki_generated"
 FALLBACK_TYPE = "Reference"
 
+# Directory names whose contents are never OpenWiki pages. The experience layer
+# accumulates across runs from agent sessions instead of being regenerated from
+# repository evidence, so every markdown-finding pass has to treat it as
+# invisible: otherwise pass_frontmatter backfills it, pass_provenance stamps it,
+# and pass_indexes both overwrites its authored index and links it from the root.
+# Matched by name at any depth, which is the cheap version -- a repository that
+# genuinely wants a documented concept directory called "experience" has to pick
+# another name.
+EXCLUDED_DIRS = {"experience"}
+
 
 def split_frontmatter(text):
     """Split leading YAML front matter. Returns (fields_text, body).
@@ -201,7 +211,7 @@ def _iter_dirs(root):
             is_real_dir = child.is_dir() and not child.is_symlink()
         except OSError:
             continue
-        if is_real_dir:
+        if is_real_dir and child.name not in EXCLUDED_DIRS:
             yield from _iter_dirs(child)
 
 
@@ -290,6 +300,8 @@ def render_index(directory, wiki):
     entries = []
     for child in sorted(directory.iterdir(), key=lambda p: p.name):
         if child.is_dir() and not child.is_symlink():
+            if child.name in EXCLUDED_DIRS:
+                continue
             if _has_real_markdown(child):
                 entries.append((
                     "%s/index.md" % _encode_href(child.name),
