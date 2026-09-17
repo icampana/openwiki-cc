@@ -297,11 +297,14 @@ class TestReportExcludedDirs(TempWiki):
     """A populated excluded directory must be reported, not silently dropped
     (Tiger 1: EXCLUDED_DIRS matches by name at any depth with no warning)."""
 
-    def test_populated_excluded_dir_is_reported_by_path(self):
+    def test_populated_top_level_excluded_dir_is_not_reported(self):
+        """openwiki/experience/ directly under the wiki root is intentional,
+        documented, and expected -- it is the feature, not the bug. A healthy
+        repo with it populated must print nothing, or the warning becomes
+        noise on every run and buries the nested case it exists to catch."""
         p = self.write("experience/candidates/a.md", "# A\n\nSomething.\n")
         warnings = finalize.report_excluded_dirs(self.wiki)
-        self.assertEqual(len(warnings), 1)
-        self.assertIn(str(self.wiki / "experience"), warnings[0])
+        self.assertEqual(warnings, [])
         self.assertTrue(p.exists())
 
     def test_empty_excluded_dir_produces_no_warning(self):

@@ -354,21 +354,28 @@ def pass_indexes(wiki):
 
 
 def report_excluded_dirs(wiki):
-    """Report every excluded directory that actually holds markdown.
+    """Report every excluded directory that actually holds markdown, except
+    one sitting directly at the wiki root.
 
     _iter_dirs makes EXCLUDED_DIRS invisible to every pass so it can never be
-    regenerated, and that silence is the bug this closes: a page dropped under
-    a directory named "experience" at any depth (not just the committed
-    openwiki/experience/) would otherwise vanish with no trace. This walks the
-    wiki's real directories itself, ignoring the exclusion, purely to look --
-    never to write, so it cannot affect idempotence -- and returns one message
-    per excluded directory that contains at least one real (non-reserved)
-    markdown file, matching pass_indexes' `orphaned index` diagnostic shape.
+    regenerated. An excluded directory directly under the wiki root (the
+    committed openwiki/experience/) is intentional and documented -- it is
+    the feature -- so warning about it on every healthy run would be noise
+    that trains people to skip the message, burying the case this pass exists
+    to catch: the same directory name reappearing somewhere unexpected, e.g.
+    openwiki/concepts/experience/design.md, silently dropping that page with
+    no trace. This walks the wiki's real directories itself, ignoring the
+    exclusion, purely to look -- never to write, so it cannot affect
+    idempotence -- and returns one message per excluded directory NOT at the
+    wiki root that contains at least one real (non-reserved) markdown file,
+    matching pass_indexes' `orphaned index` diagnostic shape.
     """
     warnings = []
+    root = wiki.resolve()
     stack = [wiki]
     while stack:
         directory = stack.pop()
+        at_root = directory.resolve() == root
         try:
             children = sorted(directory.iterdir(), key=lambda p: p.name)
         except OSError:
@@ -381,7 +388,7 @@ def report_excluded_dirs(wiki):
             if not is_real_dir:
                 continue
             if child.name in EXCLUDED_DIRS:
-                if _has_real_markdown(child):
+                if not at_root and _has_real_markdown(child):
                     warnings.append(
                         "openwiki-finalize: excluded directory has markdown "
                         "(dropped, not regenerated): %s" % child)
