@@ -26,6 +26,9 @@ to the Claude Code port in `commands/wiki.md`, which stays authoritative when th
 - The user asks to **record / observe / capture** a pattern worth a skill →
   **observe mode**: follow `commands/observe.md` in this repository, which is
   authoritative for that mode.
+- The user asks to **distill / promote** patterns into skills → **distill mode**:
+  follow `commands/distill.md` in this repository, which is authoritative for that
+  mode.
 
 ## Model tier
 
