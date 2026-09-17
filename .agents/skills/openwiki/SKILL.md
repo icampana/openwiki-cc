@@ -23,6 +23,9 @@ to the Claude Code port in `commands/wiki.md`, which stays authoritative when th
   exists → update, else → init.
 - Any extra instruction the user gives (e.g. "document the API routes first") is an additional
   instruction appended to the run.
+- The user asks to **record / observe / capture** a pattern worth a skill →
+  **observe mode**: follow `commands/observe.md` in this repository, which is
+  authoritative for that mode.
 
 ## Model tier
 
