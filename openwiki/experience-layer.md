@@ -153,6 +153,12 @@ when this surfaced), and `sessions` (an append-only list of run identifiers), th
 headings: `## Evidence`, `## Friction`, `## Would have changed`. The slug is kebab-case and
 names **the problem, not the fix**.
 
+A candidate starts with none of `decided` or `decision_date`. `/openwiki:distill` is the only
+writer of those two keys: once it rules on a candidate, it stamps `decided: accepted|rejected`
+and `decision_date: <ISO date>` onto that candidate's front matter, so the file carries its own
+verdict rather than relying only on `decisions.md` staying in sync. A candidate already carrying
+`decided` is never re-proposed, independent of what `decisions.md` says.
+
 **`decisions.md`** is headed `# Decisions` and takes one section per verdict, with the pattern,
 the candidate slugs and their session counts, the full proposed skill text, and the verdict with
 its reason. The full proposal text is kept **even on a rejection**. This is not archival
@@ -183,13 +189,18 @@ Its rules, in order of how often they matter:
 - **Write nowhere else**, propose no skill, and file no working-style observation that would hold
   in any repository — those belong in engram's personal scope, not in this repository's wiki.
 
-**`/openwiki:distill`** (`commands/distill.md`) reads `candidates/`, groups by **root cause**
-rather than surface symptom, counts distinct `sessions` entries per group, and proposes a skill
-only where the count is two or more. A single-session candidate is left alone: not proposed, not
-deleted — a pattern seen once is an anecdote, not noise. Each proposal reports the pattern, the
-slugs behind it, the quoted evidence, the skill it proposes, and what would have to be true for
-this to be the wrong call. Then a person accepts or rejects, and the verdict is appended to
-`decisions.md`. Distill proposes; it never writes a skill file.
+**`/openwiki:distill`** (`commands/distill.md`) reads `openwiki/experience/decisions.md` first and
+skips any pattern already decided there **either way** — a rejected pattern to avoid remaking the
+same proposal, an accepted one because the skill it produced already exists and re-proposing it
+only wastes a review and risks a duplicate skill. It reads `candidates/`, drops any candidate
+already carrying `decided` in its own front matter (true regardless of `decisions.md`), groups
+what remains by **root cause** rather than surface symptom, counts distinct `sessions` entries
+per group, and proposes a skill only where the count is two or more. A single-session candidate
+is left alone: not proposed, not deleted — a pattern seen once is an anecdote, not noise. Each
+proposal reports the pattern, the slugs behind it, the quoted evidence, the skill it proposes,
+and what would have to be true for this to be the wrong call. Then a person accepts or rejects,
+the verdict is appended to `decisions.md`, and every candidate behind that verdict is stamped
+with `decided` and `decision_date`. Distill proposes; it never writes a skill file.
 
 ## The two constraints that replace a reward signal
 

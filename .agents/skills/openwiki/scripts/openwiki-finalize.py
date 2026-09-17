@@ -353,6 +353,46 @@ def pass_indexes(wiki):
     return changed
 
 
+def report_excluded_dirs(wiki):
+    """Report every excluded directory that actually holds markdown.
+
+    _iter_dirs makes EXCLUDED_DIRS invisible to every pass so it can never be
+    regenerated, and that silence is the bug this closes: a page dropped under
+    a directory named "experience" at any depth (not just the committed
+    openwiki/experience/) would otherwise vanish with no trace. This walks the
+    wiki's real directories itself, ignoring the exclusion, purely to look --
+    never to write, so it cannot affect idempotence -- and returns one message
+    per excluded directory that contains at least one real (non-reserved)
+    markdown file, matching pass_indexes' `orphaned index` diagnostic shape.
+    """
+    warnings = []
+    stack = [wiki]
+    while stack:
+        directory = stack.pop()
+        try:
+            children = sorted(directory.iterdir(), key=lambda p: p.name)
+        except OSError:
+            continue
+        for child in children:
+            try:
+                is_real_dir = child.is_dir() and not child.is_symlink()
+            except OSError:
+                continue
+            if not is_real_dir:
+                continue
+            if child.name in EXCLUDED_DIRS:
+                if _has_real_markdown(child):
+                    warnings.append(
+                        "openwiki-finalize: excluded directory has markdown "
+                        "(dropped, not regenerated): %s" % child)
+                # Do not descend further -- the whole subtree is excluded,
+                # exactly as _iter_dirs treats it.
+                continue
+            stack.append(child)
+    warnings.sort()
+    return warnings
+
+
 MARKER_PREFIX = "openwiki: broken internal link"
 # LINK_RE does not match nested brackets like [a [b] c](url); such links go unflagged.
 # A missed annotation is benign. Handling arbitrary nesting would require a full Markdown
@@ -784,6 +824,8 @@ def main():
     lnk = pass_links(wiki)
     prov = pass_provenance(wiki, actor, utc_now(), state_path_for(wiki))
     delete_state(state_path_for(wiki))
+    for warning in report_excluded_dirs(wiki):
+        print(warning)
     print("openwiki-finalize: indexes %d, links %d, provenance %d"
           % (len(idx), len(lnk), len(prov)))
     for path in idx + lnk + prov:

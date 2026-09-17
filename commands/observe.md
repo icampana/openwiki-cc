@@ -58,6 +58,10 @@ sessions:
 <what a skill would have done differently>
 ```
 
+A freshly observed candidate carries no `decided` key. `/openwiki:distill` adds
+`decided: accepted|rejected` and `decision_date: <ISO date>` to a candidate's
+front matter once it rules on it — never this command, and never before then.
+
 5. Create `openwiki/experience/index.md` with the heading `# Experience` and
    `openwiki/experience/decisions.md` with the heading `# Decisions` if they do not
    exist yet.

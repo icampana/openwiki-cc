@@ -14,14 +14,26 @@ so recurrence and evidence stand in for it, and a human makes the call.
 ## Steps
 
 1. **Read `openwiki/experience/decisions.md` first.** Never re-propose anything
-   already rejected there. This is the rule the whole file exists to serve.
+   already decided there, rejected or accepted. This is the rule the whole file
+   exists to serve.
+   - **Rejected** stays out because the full proposal text is kept verbatim on
+     rejection, so a later run can recognize the same proposal and not remake it.
+   - **Accepted** stays out for a different reason: the skill this candidate
+     produced already exists, so proposing it again wastes a review cycle and
+     risks a second, duplicate skill for the same pattern.
 2. Read every `openwiki/experience/candidates/*.md`.
 3. Group candidates that share a root cause, not a surface symptom. Two candidates
    about different files with the same root cause are one pattern.
-4. For each group, count distinct entries across every member's `sessions` list.
+4. For each group, drop any candidate whose front matter already carries a
+   `decided` key (see step 7) — that key means this exact candidate was
+   already ruled on, independent of what `decisions.md` says, so it counts
+   toward nothing. Then count distinct entries across the remaining members'
+   `sessions` list.
    - **Two or more distinct sessions** → propose.
    - **One session** → leave it as a candidate. Do not propose it, and do not
      delete it. A pattern seen once is an anecdote.
+   - **Zero remaining members** (every candidate in the group already carries
+     `decided`) → nothing to propose; skip the group.
 5. For each proposal, report:
    - the pattern, as PROBLEM + ROOT CAUSE + FIX;
    - the candidate slugs behind it and their session counts;
@@ -46,6 +58,13 @@ run can recognize it and not re-propose it>
 
    Keep the full proposal text on a rejection. A verdict with the proposal
    stripped out cannot stop the same proposal being made again next month.
+
+   Then stamp every candidate behind this proposal with its own record of the
+   verdict, so the candidate file carries its state rather than relying only
+   on `decisions.md`: add `decided: accepted` or `decided: rejected` and
+   `decision_date: <ISO date>` to each candidate's front matter. Do this only
+   for a candidate this step actually decided — never touch a candidate still
+   awaiting a verdict.
 
 ## Do not
 

@@ -293,6 +293,61 @@ class TestExcludedDirs(TempWiki):
         self.assertNotIn("generated:", p.read_text(encoding="utf-8"))
 
 
+class TestReportExcludedDirs(TempWiki):
+    """A populated excluded directory must be reported, not silently dropped
+    (Tiger 1: EXCLUDED_DIRS matches by name at any depth with no warning)."""
+
+    def test_populated_excluded_dir_is_reported_by_path(self):
+        p = self.write("experience/candidates/a.md", "# A\n\nSomething.\n")
+        warnings = finalize.report_excluded_dirs(self.wiki)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn(str(self.wiki / "experience"), warnings[0])
+        self.assertTrue(p.exists())
+
+    def test_empty_excluded_dir_produces_no_warning(self):
+        (self.wiki / "experience").mkdir()
+        self.assertEqual(finalize.report_excluded_dirs(self.wiki), [])
+
+    def test_wiki_with_no_excluded_dir_produces_no_warning(self):
+        self.write("quickstart.md", "# Quickstart\n\nBody.\n")
+        self.assertEqual(finalize.report_excluded_dirs(self.wiki), [])
+
+    def test_nested_excluded_dir_is_reported(self):
+        """The dangerous case: an excluded directory nested under a real
+        concept directory, not the committed top-level openwiki/experience/."""
+        p = self.write("concepts/experience/design.md", "# Design\n\nBody.\n")
+        warnings = finalize.report_excluded_dirs(self.wiki)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn(str(p.parent), warnings[0])
+
+    def test_report_writes_nothing(self):
+        self.write("experience/index.md", "# Experience\n\nSomething.\n")
+        self.write("quickstart.md", "# Quickstart\n\nBody.\n")
+        before = {
+            str(f): f.stat().st_mtime_ns
+            for f in self.wiki.rglob("*") if f.is_file()
+        }
+        finalize.report_excluded_dirs(self.wiki)
+        after = {
+            str(f): f.stat().st_mtime_ns
+            for f in self.wiki.rglob("*") if f.is_file()
+        }
+        self.assertEqual(before, after)
+
+    def test_main_prints_warning_for_nested_excluded_dir(self):
+        """End-to-end: main() calls the reporting pass and the message
+        reaches stdout, matching pass_indexes' diagnostic style."""
+        self.write("concepts/experience/design.md", "# Design\n\nBody.\n")
+        script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
+        r = subprocess.run(
+            [sys.executable, str(script), str(self.wiki)],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("openwiki-finalize: excluded directory has markdown", r.stdout)
+        self.assertIn(str(self.wiki / "concepts" / "experience"), r.stdout)
+
+
 MARKER = "openwiki: broken internal link"
 
 
@@ -651,6 +706,17 @@ class TestIdempotence(TempWiki):
         after_one = self.snapshot()
         state = self.tmp / ".openwiki-run.json"
         self.assertFalse(state.exists(), "finalize mode must consume the state file")
+        self.full_run()
+        self.assertEqual(self.snapshot(), after_one)
+
+    def test_reporting_pass_does_not_break_idempotence(self):
+        """The new reporting pass must never write, so a wiki with a nested
+        excluded directory (the dangerous case) still reaches a true no-op."""
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("concepts/experience/design.md", "# Design\n\nBody.\n")
+
+        self.full_run()
+        after_one = self.snapshot()
         self.full_run()
         self.assertEqual(self.snapshot(), after_one)
 
