@@ -214,7 +214,9 @@ submitted.
 Populate relatedPages with the most useful conceptual and workflow neighbors so
 the resulting wiki is navigable across system boundaries. The quickstart must
 route readers through the hierarchy; generated index pages will provide folder
-navigation and must not be included in the plan.
+navigation and must not be included in the plan. The /openwiki/experience/
+subtree is an accumulated experience layer written by /openwiki:observe, not
+documentation derived from repository evidence, so never include a page under it in the plan.
 
 Init MUST include /openwiki/quickstart.md. Update MUST NOT delete quickstart. If
 an update adds, deletes, moves, or materially regroups documentation pages,

@@ -1166,6 +1166,16 @@ class TestDocClaims(unittest.TestCase):
                 text = (pathlib.Path(__file__).parent.parent / doc).read_text()
                 self.assertNotIn("Every copy is byte-identical", text)
 
+    def test_planner_is_told_never_to_plan_the_experience_subtree(self):
+        """A planned experience page gets rewritten by a Phase 2 worker, which
+        has no traces to read and replaces observations with code docs."""
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                text = (pathlib.Path(__file__).parent.parent / doc).read_text()
+                self.assertIn(
+                    "never include a page under it in the plan", text
+                )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
