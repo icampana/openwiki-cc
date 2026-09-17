@@ -11,6 +11,10 @@ git-evidence collection, the wiki structure, and the idempotence logic — and r
 natively for each host:
 
 - **Claude Code** — a slash-command plugin: `commands/wiki.md` → `/openwiki:wiki`.
+- **Claude Code** — `commands/observe.md` → `/openwiki:observe`, records one
+  evidence-bearing pattern into `openwiki/experience/`.
+- **Claude Code** — `commands/distill.md` → `/openwiki:distill`, proposes skills
+  from patterns that recurred in two or more sessions.
 - **Codex** — a skill: `.agents/skills/openwiki/SKILL.md` → `$openwiki`.
 - **opencode** — the *same* skill file, which opencode also discovers.
 - **anything else** — the same skill via [skills](https://github.com/vercel-labs/skills):

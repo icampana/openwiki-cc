@@ -47,7 +47,11 @@ git --no-pager diff --name-only <gitHead>..HEAD   # only if HEAD != gitHead
 ```
 
 Skip the model work when **all** hold:
-- `status --short` is empty after removing any line whose path is `openwiki/.last-update.json`;
+- `status --short` is empty after removing any line whose path is
+  `openwiki/.last-update.json` or under `openwiki/experience/` (**[adapted]** — that
+  subtree is accumulated by `/openwiki:observe`, not derived from repository evidence,
+  so an uncommitted observation is not a reason to run the model; upstream OpenWiki has
+  no such subtree, so `getUpdateNoopStatus` only ever excused its own metadata file);
 - HEAD == `gitHead`, **or** every path in `<gitHead>..HEAD` is under `openwiki/`.
 
 If skipped: refresh the run timestamp so freshness checks reflect the actual last run
@@ -204,7 +208,9 @@ submitted.
 Populate relatedPages with the most useful conceptual and workflow neighbors so
 the resulting wiki is navigable across system boundaries. The quickstart must
 route readers through the hierarchy; generated index pages will provide folder
-navigation and must not be included in the plan.
+navigation and must not be included in the plan. The /openwiki/experience/
+subtree is an accumulated experience layer written by /openwiki:observe, not
+documentation derived from repository evidence, so never include a page under it in the plan.
 
 Init MUST include /openwiki/quickstart.md. Update MUST NOT delete quickstart. If
 an update adds, deletes, moves, or materially regroups documentation pages,

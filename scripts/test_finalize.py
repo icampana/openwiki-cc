@@ -240,6 +240,117 @@ class TestIndexes(TempWiki):
         self.assertIn("(foo%281%29.md)", out)
         self.assertIn("(has%20space.md)", out)
 
+
+class TestExcludedDirs(TempWiki):
+    """openwiki/experience/ accumulates across runs instead of being regenerated,
+    so every finalizer pass must treat it as invisible."""
+
+    def seed(self):
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("experience/index.md", "# Experience\n\n- [a](candidates/a.md): P + C + F\n")
+        self.write("experience/decisions.md", "# Decisions\n\nNothing yet.\n")
+        return self.write(
+            "experience/candidates/a.md",
+            "# Seed paths missed the gate hook\n\nSee [b](missing.md).\n",
+        )
+
+    def test_no_frontmatter_is_backfilled_under_an_excluded_dir(self):
+        p = self.seed()
+        original = p.read_text(encoding="utf-8")
+        finalize.pass_frontmatter(self.wiki)
+        self.assertEqual(p.read_text(encoding="utf-8"), original)
+
+    def test_no_index_is_written_inside_an_excluded_dir(self):
+        self.seed()
+        finalize.pass_indexes(self.wiki)
+        target = self.wiki / "experience" / "candidates" / "index.md"
+        self.assertFalse(target.exists(), "wrote an index into the experience layer")
+
+    def test_root_index_does_not_link_an_excluded_dir(self):
+        self.seed()
+        finalize.pass_indexes(self.wiki)
+        root = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertIn("quickstart.md", root)
+        self.assertNotIn("experience", root)
+
+    def test_authored_experience_index_is_left_byte_identical(self):
+        self.seed()
+        p = self.wiki / "experience" / "index.md"
+        original = p.read_text(encoding="utf-8")
+        finalize.pass_indexes(self.wiki)
+        self.assertEqual(p.read_text(encoding="utf-8"), original)
+
+    def test_broken_links_under_an_excluded_dir_are_not_annotated(self):
+        p = self.seed()
+        finalize.pass_links(self.wiki)
+        self.assertNotIn("openwiki: broken internal link", p.read_text(encoding="utf-8"))
+
+    def test_no_provenance_stamp_lands_under_an_excluded_dir(self):
+        p = self.seed()
+        state = finalize.state_path_for(self.wiki)
+        finalize.write_state(self.wiki)
+        finalize.pass_provenance(self.wiki, "test-actor", "2026-09-17T00:00:00.000Z", state)
+        self.assertNotIn("generated:", p.read_text(encoding="utf-8"))
+
+
+class TestReportExcludedDirs(TempWiki):
+    """A populated excluded directory must be reported, not silently dropped
+    (Tiger 1: EXCLUDED_DIRS matches by name at any depth with no warning)."""
+
+    def test_populated_top_level_excluded_dir_is_not_reported(self):
+        """openwiki/experience/ directly under the wiki root is intentional,
+        documented, and expected -- it is the feature, not the bug. A healthy
+        repo with it populated must print nothing, or the warning becomes
+        noise on every run and buries the nested case it exists to catch."""
+        p = self.write("experience/candidates/a.md", "# A\n\nSomething.\n")
+        warnings = finalize.report_excluded_dirs(self.wiki)
+        self.assertEqual(warnings, [])
+        self.assertTrue(p.exists())
+
+    def test_empty_excluded_dir_produces_no_warning(self):
+        (self.wiki / "experience").mkdir()
+        self.assertEqual(finalize.report_excluded_dirs(self.wiki), [])
+
+    def test_wiki_with_no_excluded_dir_produces_no_warning(self):
+        self.write("quickstart.md", "# Quickstart\n\nBody.\n")
+        self.assertEqual(finalize.report_excluded_dirs(self.wiki), [])
+
+    def test_nested_excluded_dir_is_reported(self):
+        """The dangerous case: an excluded directory nested under a real
+        concept directory, not the committed top-level openwiki/experience/."""
+        p = self.write("concepts/experience/design.md", "# Design\n\nBody.\n")
+        warnings = finalize.report_excluded_dirs(self.wiki)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn(str(p.parent), warnings[0])
+
+    def test_report_writes_nothing(self):
+        self.write("experience/index.md", "# Experience\n\nSomething.\n")
+        self.write("quickstart.md", "# Quickstart\n\nBody.\n")
+        before = {
+            str(f): f.stat().st_mtime_ns
+            for f in self.wiki.rglob("*") if f.is_file()
+        }
+        finalize.report_excluded_dirs(self.wiki)
+        after = {
+            str(f): f.stat().st_mtime_ns
+            for f in self.wiki.rglob("*") if f.is_file()
+        }
+        self.assertEqual(before, after)
+
+    def test_main_prints_warning_for_nested_excluded_dir(self):
+        """End-to-end: main() calls the reporting pass and the message
+        reaches stdout, matching pass_indexes' diagnostic style."""
+        self.write("concepts/experience/design.md", "# Design\n\nBody.\n")
+        script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
+        r = subprocess.run(
+            [sys.executable, str(script), str(self.wiki)],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("openwiki-finalize: excluded directory has markdown", r.stdout)
+        self.assertIn(str(self.wiki / "concepts" / "experience"), r.stdout)
+
+
 MARKER = "openwiki: broken internal link"
 
 
@@ -598,6 +709,29 @@ class TestIdempotence(TempWiki):
         after_one = self.snapshot()
         state = self.tmp / ".openwiki-run.json"
         self.assertFalse(state.exists(), "finalize mode must consume the state file")
+        self.full_run()
+        self.assertEqual(self.snapshot(), after_one)
+
+    def test_reporting_pass_does_not_break_idempotence(self):
+        """The new reporting pass must never write, so a wiki with a nested
+        excluded directory (the dangerous case) still reaches a true no-op."""
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("concepts/experience/design.md", "# Design\n\nBody.\n")
+
+        self.full_run()
+        after_one = self.snapshot()
+        self.full_run()
+        self.assertEqual(self.snapshot(), after_one)
+
+    def test_a_populated_experience_layer_stays_byte_identical(self):
+        self.write("quickstart.md", "# Quickstart\n\nStart. See [arch](arch/overview.md).\n")
+        self.write("arch/overview.md", "# Overview\n\nBody.\n")
+        self.write("experience/index.md", "# Experience\n\n- [a](candidates/a.md): P + C + F\n")
+        self.write("experience/decisions.md", "# Decisions\n\nNothing yet.\n")
+        self.write("experience/candidates/a.md", "# A\n\nSee [gone](nope.md).\n")
+
+        self.full_run()
+        after_one = self.snapshot()
         self.full_run()
         self.assertEqual(self.snapshot(), after_one)
 
@@ -961,17 +1095,47 @@ class TestProvenancePass(TempWiki):
 
 
 class TestShippedCopy(unittest.TestCase):
-    def test_skill_ships_an_identical_finalizer(self):
-        """The skill folder carries its own copy for installed-skill runs.
+    """Every canonical/shipped pair must stay byte-identical.
 
-        Editing scripts/openwiki-finalize.py without refreshing the twin would
-        make installed skills silently run stale finalize logic.
+    Editing a canonical file without refreshing its shipped twin would make
+    installed skills (Codex, opencode) silently run stale logic. Adding a
+    fourth pair is a one-line addition to SHIPPED_PAIRS, not a new test.
+    """
+
+    SHIPPED_PAIRS = [
+        ("scripts/openwiki-finalize.py",
+         ".agents/skills/openwiki/scripts/openwiki-finalize.py"),
+        ("commands/observe.md",
+         ".agents/skills/openwiki/commands/observe.md"),
+        ("commands/distill.md",
+         ".agents/skills/openwiki/commands/distill.md"),
+    ]
+
+    def test_shipped_copies_are_byte_identical_to_their_canonical_source(self):
+        repo = pathlib.Path(__file__).parent.parent
+        for canonical_rel, shipped_rel in self.SHIPPED_PAIRS:
+            with self.subTest(canonical=canonical_rel, shipped=shipped_rel):
+                canonical = repo / canonical_rel
+                shipped = repo / shipped_rel
+                self.assertTrue(canonical.exists(), "missing canonical: %s" % canonical)
+                self.assertTrue(shipped.exists(), "missing shipped copy: %s" % shipped)
+                self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
+
+    def test_every_command_except_wiki_has_a_shipped_twin(self):
+        """SHIPPED_PAIRS is hand-maintained, so a new commands/foo.md with no
+        twin entry would pass every other test in this suite silently.
+        commands/wiki.md is excluded: its counterpart is SKILL.md, an
+        adapted port already covered by DOC_PAIR, not a byte-identical twin.
         """
         repo = pathlib.Path(__file__).parent.parent
-        canonical = repo / "scripts" / "openwiki-finalize.py"
-        shipped = repo / ".agents" / "skills" / "openwiki" / "scripts" / "openwiki-finalize.py"
-        self.assertTrue(shipped.exists(), "missing shipped copy: %s" % shipped)
-        self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
+        shipped_names = {pathlib.Path(c).name for c, _ in self.SHIPPED_PAIRS
+                          if c.startswith("commands/")}
+        command_files = {p.name for p in (repo / "commands").glob("*.md")}
+        command_files.discard("wiki.md")
+        self.assertEqual(
+            command_files, shipped_names,
+            "commands/ has files with no entry in SHIPPED_PAIRS: %s"
+            % (command_files - shipped_names))
 
 
 DOC_PAIR = ("commands/wiki.md", ".agents/skills/openwiki/SKILL.md")
@@ -1100,6 +1264,16 @@ class TestDocClaims(unittest.TestCase):
             with self.subTest(doc=doc):
                 text = (pathlib.Path(__file__).parent.parent / doc).read_text()
                 self.assertNotIn("Every copy is byte-identical", text)
+
+    def test_planner_is_told_never_to_plan_the_experience_subtree(self):
+        """A planned experience page gets rewritten by a Phase 2 worker, which
+        has no traces to read and replaces observations with code docs."""
+        for doc in DOC_PAIR:
+            with self.subTest(doc=doc):
+                text = (pathlib.Path(__file__).parent.parent / doc).read_text()
+                self.assertIn(
+                    "never include a page under it in the plan", text
+                )
 
 
 if __name__ == "__main__":

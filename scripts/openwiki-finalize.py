@@ -30,6 +30,16 @@ RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md", "INSTRUCTIONS.md"}
 GENERATED_FIELD = "openwiki_generated"
 FALLBACK_TYPE = "Reference"
 
+# Directory names whose contents are never OpenWiki pages. The experience layer
+# accumulates across runs from agent sessions instead of being regenerated from
+# repository evidence, so every markdown-finding pass has to treat it as
+# invisible: otherwise pass_frontmatter backfills it, pass_provenance stamps it,
+# and pass_indexes both overwrites its authored index and links it from the root.
+# Matched by name at any depth, which is the cheap version -- a repository that
+# genuinely wants a documented concept directory called "experience" has to pick
+# another name.
+EXCLUDED_DIRS = {"experience"}
+
 
 def split_frontmatter(text):
     """Split leading YAML front matter. Returns (fields_text, body).
@@ -201,7 +211,7 @@ def _iter_dirs(root):
             is_real_dir = child.is_dir() and not child.is_symlink()
         except OSError:
             continue
-        if is_real_dir:
+        if is_real_dir and child.name not in EXCLUDED_DIRS:
             yield from _iter_dirs(child)
 
 
@@ -290,6 +300,8 @@ def render_index(directory, wiki):
     entries = []
     for child in sorted(directory.iterdir(), key=lambda p: p.name):
         if child.is_dir() and not child.is_symlink():
+            if child.name in EXCLUDED_DIRS:
+                continue
             if _has_real_markdown(child):
                 entries.append((
                     "%s/index.md" % _encode_href(child.name),
@@ -339,6 +351,53 @@ def pass_indexes(wiki):
         print("openwiki-finalize: orphaned index (no pages remain): %s" % orphan)
 
     return changed
+
+
+def report_excluded_dirs(wiki):
+    """Report every excluded directory that actually holds markdown, except
+    one sitting directly at the wiki root.
+
+    _iter_dirs makes EXCLUDED_DIRS invisible to every pass so it can never be
+    regenerated. An excluded directory directly under the wiki root (the
+    committed openwiki/experience/) is intentional and documented -- it is
+    the feature -- so warning about it on every healthy run would be noise
+    that trains people to skip the message, burying the case this pass exists
+    to catch: the same directory name reappearing somewhere unexpected, e.g.
+    openwiki/concepts/experience/design.md, silently dropping that page with
+    no trace. This walks the wiki's real directories itself, ignoring the
+    exclusion, purely to look -- never to write, so it cannot affect
+    idempotence -- and returns one message per excluded directory NOT at the
+    wiki root that contains at least one real (non-reserved) markdown file,
+    matching pass_indexes' `orphaned index` diagnostic shape.
+    """
+    warnings = []
+    root = wiki.resolve()
+    stack = [wiki]
+    while stack:
+        directory = stack.pop()
+        at_root = directory.resolve() == root
+        try:
+            children = sorted(directory.iterdir(), key=lambda p: p.name)
+        except OSError:
+            continue
+        for child in children:
+            try:
+                is_real_dir = child.is_dir() and not child.is_symlink()
+            except OSError:
+                continue
+            if not is_real_dir:
+                continue
+            if child.name in EXCLUDED_DIRS:
+                if not at_root and _has_real_markdown(child):
+                    warnings.append(
+                        "openwiki-finalize: excluded directory has markdown "
+                        "(dropped, not regenerated): %s" % child)
+                # Do not descend further -- the whole subtree is excluded,
+                # exactly as _iter_dirs treats it.
+                continue
+            stack.append(child)
+    warnings.sort()
+    return warnings
 
 
 MARKER_PREFIX = "openwiki: broken internal link"
@@ -772,6 +831,8 @@ def main():
     lnk = pass_links(wiki)
     prov = pass_provenance(wiki, actor, utc_now(), state_path_for(wiki))
     delete_state(state_path_for(wiki))
+    for warning in report_excluded_dirs(wiki):
+        print(warning)
     print("openwiki-finalize: indexes %d, links %d, provenance %d"
           % (len(idx), len(lnk), len(prov)))
     for path in idx + lnk + prov:

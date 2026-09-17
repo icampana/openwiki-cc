@@ -17,7 +17,12 @@ meta=openwiki/.last-update.json
 head=$(git rev-parse HEAD 2>/dev/null) || exit 0
 # ponytail: sed-parse gitHead out of the flat JSON; jq if the shape ever nests.
 last=$([ -f "$meta" ] && sed -n 's/.*"gitHead":[[:space:]]*"\([^"]*\)".*/\1/p' "$meta" | head -1 || true)
-dirty=$(git status --short --untracked-files=all | grep -v 'openwiki/\.last-update\.json$' || true)
+# .last-update.json is rewritten by every run; openwiki/experience/ is the
+# accumulated experience layer, written by /openwiki:observe rather than derived
+# from source. Neither is a reason to regenerate documentation.
+dirty=$(git status --short --untracked-files=all \
+  | grep -v 'openwiki/\.last-update\.json$' \
+  | grep -v 'openwiki/experience/' || true)
 
 # No recorded gitHead → upstream skips the no-op check → let claude decide.
 if [ -n "$last" ] && [ -z "$dirty" ]; then

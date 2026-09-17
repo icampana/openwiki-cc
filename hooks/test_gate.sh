@@ -50,6 +50,14 @@ echo x > openwiki/page.md
 run "untracked openwiki/ file in tree" spawn
 rm openwiki/page.md
 
+# untracked observation → skip (the experience layer is not repository evidence)
+mkdir -p openwiki/experience/candidates
+echo x > openwiki/experience/candidates/a.md
+run "untracked experience candidate" skip
+echo y > openwiki/experience/decisions.md
+run "untracked experience decisions" skip
+rm -rf openwiki/experience
+
 # HEAD moved, source commit → spawn
 echo more >> file.txt && git commit -qam second
 run "HEAD moved with source change" spawn

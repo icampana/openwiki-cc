@@ -1,9 +1,9 @@
 ---
 type: Architecture Overview
 title: Architecture — how a run executes
-description: The execution contract behind an openwiki-cc run — mode routing, the git-evidence/snapshot/system-prompt/finalize/metadata lifecycle, idempotence, root-agent-file behavior, and upstream drift detection.
+description: The execution contract behind an openwiki-cc run — mode routing, the git-evidence/snapshot/system-prompt/finalize/metadata lifecycle, idempotence, root-agent-file behavior, upstream drift detection, and how every pass and the session-end hook treat the experience layer as invisible.
 tags: [openwiki-cc, agent-port]
-generated: { by: muse-spark, at: 2026-09-07T23:24:26Z }
+generated: { by: claude-opus-5, at: 2026-09-17T16:26:58Z }
 ---
 
 # Architecture — how a run executes
@@ -93,7 +93,11 @@ steps self-corrects.
 (upstream `createRepositoryPlannerPrompt`): explore the repo, design the smallest complete
 information architecture (hierarchical paths, `relatedPages` for navigation, quickstart
 required on init, `pages: []` allowed when an update needs nothing), and hold the plan —
-path, title, purpose, seedPaths, relatedPages, instructions per page — in context. Then one
+path, title, purpose, seedPaths, relatedPages, instructions per page — in context. The planner
+prompt is told never to plan a page under `/openwiki/experience/`: that subtree is the
+[experience layer](experience-layer.md), populated by its own commands rather than by a run,
+so a plan that included it would hand a Phase 2 worker a page to rewrite from repository
+evidence — exactly the regeneration the layer is designed to be exempt from. Then one
 **page worker** per planned page (upstream `createRepositoryPagePrompt`), each briefed with
 its plan entry: update workers read the current page first and change only what repository
 evidence requires; every worker writes exactly one page and owns nothing else.
@@ -144,6 +148,18 @@ Two independent mechanisms keep re-runs cheap and honest:
   file replaces upstream OpenWiki's SQLite checkpointer; durable crash-resume is intentionally
   dropped as unnecessary on these hosts. The single update window (changed paths since
   `gitHead`) replaces upstream's per-page committed baselines.
+- **`EXCLUDED_DIRS` in `openwiki-finalize.py`** — every pass (frontmatter backfill, index
+  generation, link annotation, provenance stamping) reaches the filesystem through one helper,
+  `_iter_dirs`, and that helper refuses to descend into a directory named `experience`. Two
+  checks are required to make the whole [experience layer](experience-layer.md) invisible to
+  every deterministic pass: `_iter_dirs` keeps every pass from descending into it, and
+  `render_index` has its own, load-bearing `EXCLUDED_DIRS` check when building a parent index —
+  `_iter_dirs` yields its own argument *before* it filters anything, so without that second
+  check `_has_real_markdown` would still report real pages inside an excluded directory and the
+  root index would link it. With both checks in place, the root never links to it, and it never
+  gets a body-hash entry, a stamped `generated` field, or a backfilled front-matter block. The
+  layer is written and owned by its own commands, not by a wiki run, so none of that machinery
+  should ever touch it.
 
 ## Root agent-file wiring
 
@@ -167,7 +183,11 @@ let Step 0 discover there's no work.
 
 [`hooks/openwiki-gate.sh`](../hooks/openwiki-gate.sh) fixes that by reproducing the Step 0 no-op
 check in **pure shell** (a few `git` commands, zero tokens) and spawning `claude` **only** when
-source actually changed since the recorded `gitHead`. It also carries the `OPENWIKI_HOOK=1` guard
+source actually changed since the recorded `gitHead`. Its dirty-tree check strips both
+`openwiki/.last-update.json` and `openwiki/experience/` before deciding whether the tree is
+clean — the metadata file is rewritten by every run and the [experience
+layer](experience-layer.md) accumulates from agent sessions rather than from source, so neither
+is a reason to spawn a documentation run. It also carries the `OPENWIKI_HOOK=1` guard
 (the headless run fires its own `Stop` hook → the gate exits early to avoid infinite recursion)
 and detaches with `setsid` so it never blocks the session. Wired in `.claude/settings.json`:
 ```json
