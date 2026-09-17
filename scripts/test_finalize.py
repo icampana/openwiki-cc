@@ -1026,17 +1026,31 @@ class TestProvenancePass(TempWiki):
 
 
 class TestShippedCopy(unittest.TestCase):
-    def test_skill_ships_an_identical_finalizer(self):
-        """The skill folder carries its own copy for installed-skill runs.
+    """Every canonical/shipped pair must stay byte-identical.
 
-        Editing scripts/openwiki-finalize.py without refreshing the twin would
-        make installed skills silently run stale finalize logic.
-        """
+    Editing a canonical file without refreshing its shipped twin would make
+    installed skills (Codex, opencode) silently run stale logic. Adding a
+    fourth pair is a one-line addition to SHIPPED_PAIRS, not a new test.
+    """
+
+    SHIPPED_PAIRS = [
+        ("scripts/openwiki-finalize.py",
+         ".agents/skills/openwiki/scripts/openwiki-finalize.py"),
+        ("commands/observe.md",
+         ".agents/skills/openwiki/commands/observe.md"),
+        ("commands/distill.md",
+         ".agents/skills/openwiki/commands/distill.md"),
+    ]
+
+    def test_shipped_copies_are_byte_identical_to_their_canonical_source(self):
         repo = pathlib.Path(__file__).parent.parent
-        canonical = repo / "scripts" / "openwiki-finalize.py"
-        shipped = repo / ".agents" / "skills" / "openwiki" / "scripts" / "openwiki-finalize.py"
-        self.assertTrue(shipped.exists(), "missing shipped copy: %s" % shipped)
-        self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
+        for canonical_rel, shipped_rel in self.SHIPPED_PAIRS:
+            with self.subTest(canonical=canonical_rel, shipped=shipped_rel):
+                canonical = repo / canonical_rel
+                shipped = repo / shipped_rel
+                self.assertTrue(canonical.exists(), "missing canonical: %s" % canonical)
+                self.assertTrue(shipped.exists(), "missing shipped copy: %s" % shipped)
+                self.assertEqual(canonical.read_bytes(), shipped.read_bytes())
 
 
 DOC_PAIR = ("commands/wiki.md", ".agents/skills/openwiki/SKILL.md")

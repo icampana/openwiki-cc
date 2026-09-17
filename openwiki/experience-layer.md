@@ -77,7 +77,8 @@ if child.is_dir() and not child.is_symlink():
 This second check is load-bearing because of how `_iter_dirs` is written: **it yields its own
 argument before it filters anything.** `_has_real_markdown(child)` calls `_iter_dirs(child)`,
 which yields `child` itself — so calling it on `openwiki/experience` would list that directory's
-own `index.md`/`decisions.md` and report "yes, real pages here". Without the explicit skip, the
+own `decisions.md` and any `candidates/*.md` (`index.md` is in `RESERVED` and filtered out
+regardless) and report "yes, real pages here". Without the explicit skip, the
 root index would grow a `- [Experience](experience/index.md)` entry, linking a subtree that is
 otherwise invisible to the tool. `pass_indexes` (`scripts/openwiki-finalize.py:322`) needs no
 third check: its directory list comes from `_iter_dirs(wiki)`, which never yields `experience`
@@ -164,11 +165,12 @@ acquires one — that is Guard 1 working. These pages are authored, not generate
 
 ## The two commands
 
-**`/openwiki:observe`** (`commands/observe.md`) appends exactly one candidate. It runs two ways:
-inside a session when someone hits friction worth keeping, and after Step 3b of a
-`/openwiki:wiki` run, from the friction Phase 2 workers reported in their final messages — the
-evidence a worker needed that its `seedPaths` did not provide. The worker contract is unchanged
-by this: workers still write only their own page and merely *report*; the orchestrator files.
+**`/openwiki:observe`** (`commands/observe.md`) appends exactly one candidate, in-session, when
+someone hits friction worth keeping. Feeding it from the friction a `/openwiki:wiki` run's Phase 2
+workers hit — the evidence a worker needed that its `seedPaths` did not provide — is not wired in
+this release: the worker prompt has no friction-reporting step, so nothing captures it. Wiring
+that in would mean changing the Phase 2 worker prompt, whose contract intentionally ends "Write
+only `${job.path}`. Do not create, edit, or delete another wiki page."
 
 Its rules, in order of how often they matter:
 

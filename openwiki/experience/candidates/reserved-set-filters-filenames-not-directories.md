@@ -11,14 +11,14 @@ sessions:
 
 `scripts/openwiki-finalize.py:29` — `RESERVED = {"index.md", "log.md", "_plan.md",
 "_sidebar.md", "INSTRUCTIONS.md"}`. It is checked as `path.name in RESERVED` (e.g.
-`scripts/openwiki-finalize.py:232`, inside `pass_frontmatter`, and again at lines 277,
+`scripts/openwiki-finalize.py:236`, inside `pass_frontmatter`, and again at lines 277,
 310, 681, 738) — a check against a file's basename, run on paths already yielded by
 `markdown_files`/`_iter_dirs`. `RESERVED` never gates which directories get walked in
 the first place; the actual directory gate is `_iter_dirs` (`scripts/openwiki-finalize.py:193`),
 which recurses into every real (non-symlinked) child directory whose name is not in
 `EXCLUDED_DIRS` (`scripts/openwiki-finalize.py:41`, checked at line 214). All four
-finalizer passes (`markdown_files`, `pass_frontmatter`, `pass_indexes`, provenance
-reconciliation) reach the filesystem through `_iter_dirs`, so `EXCLUDED_DIRS` is the
+finalizer passes (`pass_frontmatter`, `pass_indexes`, `pass_links`, `pass_provenance`)
+reach the filesystem through `_iter_dirs`, so `EXCLUDED_DIRS` is the
 single seam that makes a whole subtree invisible.
 
 ## Friction

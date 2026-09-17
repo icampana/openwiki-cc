@@ -75,7 +75,7 @@ install it into opencode, Claude Code, Codex, Cursor, and 70+ more agents from o
 Step 3b finalizer ships inside the skill folder, so installs are complete out of the box; details
 in [Install — any agent](../README.md#install--any-agent-one-command).
 
-## The four commands
+## The three commands, six invocations
 
 | Invocation | Behavior |
 |---|---|

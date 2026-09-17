@@ -150,12 +150,16 @@ Two independent mechanisms keep re-runs cheap and honest:
   `gitHead`) replaces upstream's per-page committed baselines.
 - **`EXCLUDED_DIRS` in `openwiki-finalize.py`** — every pass (frontmatter backfill, index
   generation, link annotation, provenance stamping) reaches the filesystem through one helper,
-  `_iter_dirs`, and that helper refuses to descend into a directory named `experience`. One
-  filter is enough to make the whole [experience layer](experience-layer.md) invisible to
-  every deterministic pass: `render_index` skips it when building a parent index, so the root
-  never links to it, and it never gets a body-hash entry, a stamped `generated` field, or a
-  backfilled front-matter block. The layer is written and owned by its own commands, not by a
-  wiki run, so none of that machinery should ever touch it.
+  `_iter_dirs`, and that helper refuses to descend into a directory named `experience`. Two
+  checks are required to make the whole [experience layer](experience-layer.md) invisible to
+  every deterministic pass: `_iter_dirs` keeps every pass from descending into it, and
+  `render_index` has its own, load-bearing `EXCLUDED_DIRS` check when building a parent index —
+  `_iter_dirs` yields its own argument *before* it filters anything, so without that second
+  check `_has_real_markdown` would still report real pages inside an excluded directory and the
+  root index would link it. With both checks in place, the root never links to it, and it never
+  gets a body-hash entry, a stamped `generated` field, or a backfilled front-matter block. The
+  layer is written and owned by its own commands, not by a wiki run, so none of that machinery
+  should ever touch it.
 
 ## Root agent-file wiring
 
