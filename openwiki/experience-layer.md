@@ -3,7 +3,7 @@ type: Subsystem Concept
 title: The experience layer
 description: openwiki/experience/ is an accumulating record of patterns worth turning into skills — why it is structurally exempt from every generation pass, how the three guards enforce that, and the two commands (/openwiki:observe, /openwiki:distill) that write and promote it.
 tags: [openwiki-cc, experience-layer, finalizer, skills, wikiskill]
-generated: { by: claude-opus-5, at: 2026-09-17T16:26:58Z }
+generated: { by: claude-opus-5, at: 2026-09-17T17:08:15Z }
 ---
 
 # The experience layer
