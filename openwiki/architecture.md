@@ -1,7 +1,7 @@
 ---
 type: Architecture Overview
 title: Architecture — how a run executes
-description: The execution contract behind an openwiki-cc run — mode routing, the git-evidence/snapshot/system-prompt/finalize/metadata lifecycle, idempotence, root-agent-file behavior, upstream drift detection, and how every pass and the session-end hook treat the experience layer as invisible.
+description: The execution contract behind an openwiki-cc run — mode routing, the git-evidence/snapshot/system-prompt/finalize/metadata lifecycle, idempotence, root-agent-file behavior, upstream drift detection, and why no pass writes inside the experience layer while the root index still links to it.
 tags: [openwiki-cc, agent-port]
 generated: { by: claude-opus-5, at: 2026-09-17T16:26:58Z }
 ---
@@ -125,6 +125,22 @@ never deletes content. It is idempotent by contract — a run that changes no pa
 every wiki file byte-identical — otherwise a no-op `update` would churn files and defeat the
 gate described below.
 
+Its first line of output, on every run including the early returns, is the copy's own version:
+
+```
+openwiki-finalize: version 0.7.0
+```
+
+This exists because the script resolves from six candidate paths
+(`.agents/skills/openwiki/SKILL.md:161-166`), any of which may hold a marketplace plugin, a
+pinned plugin cache, a hand-copied folder, or a symlink into a checkout — and a stale copy is
+otherwise indistinguishable from a current one in its output. Three separate incidents have
+been an out-of-date finalizer doing the wrong thing in silence; the worst regenerated an
+authored `openwiki/experience/index.md` and stamped its candidates on a version that predated
+`EXCLUDED_DIRS` entirely. `VERSION` is pinned to `.claude-plugin/plugin.json` by
+`TestVersionBanner`, so the number it reports is the one users install by. Nothing parses this
+script's stdout, so the banner costs nothing to add.
+
 **Step 4 — persist metadata.** Write `openwiki/.last-update.json` on **every** completed run,
 including no-ops (upstream #647):
 ```json
@@ -151,15 +167,27 @@ Two independent mechanisms keep re-runs cheap and honest:
 - **`EXCLUDED_DIRS` in `openwiki-finalize.py`** — every pass (frontmatter backfill, index
   generation, link annotation, provenance stamping) reaches the filesystem through one helper,
   `_iter_dirs`, and that helper refuses to descend into a directory named `experience`. Two
-  checks are required to make the whole [experience layer](experience-layer.md) invisible to
-  every deterministic pass: `_iter_dirs` keeps every pass from descending into it, and
+  checks are required to keep every deterministic pass from *writing* anywhere inside the
+  [experience layer](experience-layer.md) — the one thing `pass_indexes` still reads it for is
+  the navigation entry described below: `_iter_dirs` keeps every pass from descending into it, and
   `render_index` has its own, load-bearing `EXCLUDED_DIRS` check when building a parent index —
   `_iter_dirs` yields its own argument *before* it filters anything, so without that second
-  check `_has_real_markdown` would still report real pages inside an excluded directory and the
-  root index would link it. With both checks in place, the root never links to it, and it never
-  gets a body-hash entry, a stamped `generated` field, or a backfilled front-matter block. The
-  layer is written and owned by its own commands, not by a wiki run, so none of that machinery
-  should ever touch it.
+  check `_has_real_markdown` would report real pages inside an excluded directory and every
+  parent index would link straight into the layer. With both checks in place the layer never
+  gets an index written inside it, a body-hash entry, a stamped `generated` field, or a
+  backfilled front-matter block. The layer is written and owned by its own commands, not by a
+  wiki run, so none of that machinery should ever touch it.
+
+  The one deliberate exception is navigation (OW-9). Not writing inside the layer is the
+  invariant; making the layer *unreachable* was an accident of it. A knowledge base that
+  accumulates across runs and that nothing links to is a knowledge base nobody reads, so
+  `render_index` emits exactly one fixed `- [Experience](experience/index.md)` entry — root
+  index only, and only when that `index.md` exists and the directory holds a real page. Both
+  conditions are load-bearing: `pass_links` runs immediately after `pass_indexes`, so authoring
+  a link to a missing target would annotate the root index as broken on the same run, and an
+  index-only stub advertises a layer with nothing behind it. A *nested* `experience/` is the
+  accident the exclusion exists to catch and stays unlinked — `report_excluded_dirs` warns
+  about it instead.
 
 ## Root agent-file wiring
 

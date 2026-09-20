@@ -6,9 +6,10 @@ allowed-tools: Bash, Read, Write, Edit, Grep, Glob
 
 # /openwiki:observe — capture a skill-worthy pattern
 
-Appends exactly one candidate to `openwiki/experience/`. The subtree is excluded
-from every finalizer pass and is never planned, so nothing here is regenerated:
-what you write is what stays.
+Appends exactly one candidate to `openwiki/experience/`. No finalizer pass writes
+inside the subtree and it is never planned, so nothing here is regenerated:
+what you write is what stays. The root `index.md` links to it; that entry is the
+only thing a run derives from the layer, and it never touches what is underneath.
 
 ## When this runs
 

@@ -27,6 +27,18 @@ import urllib.parse
 # _plan.md stays as legacy defense (this port's earlier versions wrote one);
 # _sidebar.md stays (OW-5: Docsify nav partial).
 RESERVED = {"index.md", "log.md", "_plan.md", "_sidebar.md", "INSTRUCTIONS.md"}
+
+# Printed on every run, including the early-exit paths. Installs go stale in
+# ways nothing else makes visible: a hand-copied skill folder, a plugin cache
+# pinned to an older version, a symlink pointing at a feature branch. Three
+# incidents have now been an out-of-date copy doing the wrong thing in
+# silence, the last being a 0.5.x finalizer regenerating an authored
+# openwiki/experience/index.md and stamping its candidates. Nothing parses
+# this script's stdout, so the banner is free to add and turns "why did it do
+# that" into one line of output. Must match .claude-plugin/plugin.json --
+# TestVersionBanner fails the build when it drifts.
+VERSION = "0.7.0"
+
 GENERATED_FIELD = "openwiki_generated"
 FALLBACK_TYPE = "Reference"
 
@@ -297,10 +309,36 @@ def _encode_href(name):
 
 def render_index(directory, wiki):
     """Render a directory index. Deterministic: entries are sorted by href."""
+    is_root = directory.resolve() == wiki.resolve()
     entries = []
     for child in sorted(directory.iterdir(), key=lambda p: p.name):
         if child.is_dir() and not child.is_symlink():
             if child.name in EXCLUDED_DIRS:
+                # The exclusion stops this script WRITING inside the layer; it
+                # must not make the layer unreachable. A knowledge base that
+                # accumulates across runs and that nothing links to is a
+                # knowledge base nobody reads, so a root-level excluded
+                # directory earns exactly one fixed entry pointing at the
+                # index the observe skill authors -- which no pass rewrites.
+                #
+                # Two conditions, both load-bearing. The index.md must exist,
+                # because this is a link the script authors and pass_links
+                # runs right after pass_indexes: linking a missing target
+                # would annotate the root index as broken on the same run.
+                # And _has_real_markdown must hold, so an index-only stub is
+                # treated like any other empty directory rather than
+                # advertising a layer with nothing behind it.
+                #
+                # Root-level only. A nested experience/ is the accident the
+                # exclusion exists to catch, and report_excluded_dirs warns
+                # about it; linking one would legitimize the mistake.
+                if (is_root
+                        and (child / "index.md").is_file()
+                        and _has_real_markdown(child)):
+                    entries.append((
+                        "%s/index.md" % _encode_href(child.name),
+                        child.name.replace("-", " ").title(),
+                    ))
                 continue
             if _has_real_markdown(child):
                 entries.append((
@@ -811,6 +849,10 @@ def main():
     ap.add_argument("--actor", default="openwiki-cc",
                     help="producer recorded in `generated` events (the command passes the running model id)")
     args = ap.parse_args()
+
+    # Before anything else, and before every early return below: the run that
+    # most needs to name its version is the one that exits without doing work.
+    print("openwiki-finalize: version %s" % VERSION)
 
     wiki = pathlib.Path(args.wiki)
     if not wiki.is_dir():
