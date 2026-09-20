@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for openwiki-finalize.py. Run: python3 scripts/test_finalize.py"""
+import json
 import os
 import pathlib
 import shutil
@@ -266,12 +267,57 @@ class TestExcludedDirs(TempWiki):
         target = self.wiki / "experience" / "candidates" / "index.md"
         self.assertFalse(target.exists(), "wrote an index into the experience layer")
 
-    def test_root_index_does_not_link_an_excluded_dir(self):
+    def test_root_index_links_a_populated_experience_dir(self):
+        """OW-9: the exclusion keeps the finalizer from WRITING inside the
+        layer; it must not make the layer unreachable. An accumulating
+        knowledge base nobody can navigate to gets forgotten, so the root
+        index carries exactly one fixed entry pointing at the authored
+        experience/index.md -- which the finalizer still never rewrites."""
         self.seed()
         finalize.pass_indexes(self.wiki)
         root = (self.wiki / "index.md").read_text(encoding="utf-8")
         self.assertIn("quickstart.md", root)
+        self.assertIn("- [Experience](experience/index.md)", root)
+        self.assertEqual(root.count("experience/index.md"), 1)
+
+    def test_root_index_omits_an_experience_dir_with_no_index(self):
+        """The entry is a link this script authors, so it is only written when
+        its target exists -- otherwise pass_links would annotate the root index
+        as broken on the very next pass."""
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("experience/candidates/a.md", "# A\n\nBody.\n")
+        finalize.pass_indexes(self.wiki)
+        root = (self.wiki / "index.md").read_text(encoding="utf-8")
         self.assertNotIn("experience", root)
+
+    def test_root_index_omits_an_experience_dir_holding_only_an_index(self):
+        """An index-only stub has no pages behind it, so it is treated like
+        any other empty directory: not linked."""
+        self.write("quickstart.md", "# Quickstart\n\nStart here.\n")
+        self.write("experience/index.md", "# Experience\n\nNothing yet.\n")
+        finalize.pass_indexes(self.wiki)
+        root = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertNotIn("experience", root)
+
+    def test_nested_experience_dir_is_still_never_linked(self):
+        """Only a root-level experience/ is the feature. The nested case stays
+        fully excluded -- see TestReportExcludedDirs for why it warns."""
+        self.write("concepts/a.md", "# A\n\nBody.\n")
+        self.write("concepts/experience/index.md", "# Experience\n\nBody.\n")
+        self.write("concepts/experience/b.md", "# B\n\nBody.\n")
+        finalize.pass_indexes(self.wiki)
+        nested = (self.wiki / "concepts" / "index.md").read_text(encoding="utf-8")
+        self.assertNotIn("experience", nested)
+
+    def test_root_experience_link_is_not_flagged_broken(self):
+        """End-to-end: the entry this script authors must survive the link
+        pass that runs immediately after it."""
+        self.seed()
+        finalize.pass_indexes(self.wiki)
+        finalize.pass_links(self.wiki)
+        root = (self.wiki / "index.md").read_text(encoding="utf-8")
+        self.assertIn("- [Experience](experience/index.md)", root)
+        self.assertNotIn(MARKER, root)
 
     def test_authored_experience_index_is_left_byte_identical(self):
         self.seed()
@@ -349,6 +395,52 @@ class TestReportExcludedDirs(TempWiki):
         self.assertEqual(r.returncode, 0)
         self.assertIn("openwiki-finalize: excluded directory has markdown", r.stdout)
         self.assertIn(str(self.wiki / "concepts" / "experience"), r.stdout)
+
+
+class TestVersionBanner(TempWiki):
+    """OW-9: a stale installed copy must announce itself.
+
+    Three separate incidents traced back to an out-of-date finalizer doing the
+    wrong thing in silence -- most recently a 0.5.x copy regenerating an
+    authored openwiki/experience/index.md and stamping its candidates. The
+    output gave no way to tell which copy ran. Printing the version on every
+    run turns a silent wrong answer into a visible one.
+    """
+
+    def _run(self, *args):
+        script = pathlib.Path(__file__).parent / "openwiki-finalize.py"
+        return subprocess.run(
+            [sys.executable, str(script), *args],
+            capture_output=True, text=True, timeout=10,
+        )
+
+    def test_version_is_printed_on_a_normal_run(self):
+        self.write("a.md", "# A\n\nBody.\n")
+        r = self._run(str(self.wiki))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("openwiki-finalize: version %s" % finalize.VERSION, r.stdout)
+
+    def test_version_is_printed_in_snapshot_mode(self):
+        self.write("a.md", "# A\n\nBody.\n")
+        r = self._run("--snapshot", str(self.wiki))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("openwiki-finalize: version %s" % finalize.VERSION, r.stdout)
+
+    def test_version_is_printed_even_when_the_wiki_is_missing(self):
+        """The no-such-directory path returns early. It still has to say which
+        copy ran -- 'nothing to do' from a stale script is the most misleading
+        output this tool can produce."""
+        r = self._run(str(self.tmp / "nope"))
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("openwiki-finalize: version %s" % finalize.VERSION, r.stdout)
+
+    def test_version_matches_the_plugin_manifest(self):
+        """The manifest is the version users install by. A VERSION constant
+        that drifts from it would report a number nobody can act on."""
+        repo = pathlib.Path(__file__).parent.parent
+        manifest = json.loads(
+            (repo / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(finalize.VERSION, manifest["version"])
 
 
 MARKER = "openwiki: broken internal link"

@@ -44,13 +44,13 @@ per pass that could reach it.
 EXCLUDED_DIRS = {"experience"}
 ```
 
-(`scripts/openwiki-finalize.py:41`). It is matched **by directory name at any depth**, which is
+(`scripts/openwiki-finalize.py:53`). It is matched **by directory name at any depth**, which is
 the cheap version: a repository that genuinely wants a documented concept directory called
 `experience` has to pick another name.
 
 It is applied in two places, and the second is not redundant.
 
-**In `_iter_dirs` (`scripts/openwiki-finalize.py:193`).** This generator is the filesystem seam
+**In `_iter_dirs` (`scripts/openwiki-finalize.py:205`).** This generator is the filesystem seam
 for the whole script. `markdown_files` walks it, and `markdown_files` feeds `pass_frontmatter`,
 `pass_links`, `write_state`, and `pass_provenance`. Its child filter is:
 
@@ -63,12 +63,16 @@ Because the filter gates *recursion*, excluding `experience` removes the subtree
 passes at once. No front matter is backfilled, no broken link is annotated, no body hash is
 snapshotted, no `generated:` stamp lands.
 
-**In `render_index` (`scripts/openwiki-finalize.py:298`).** The child-directory loop skips
+**In `render_index` (`scripts/openwiki-finalize.py:310`).** The child-directory loop skips
 `EXCLUDED_DIRS` explicitly before deciding whether to link a subdirectory:
 
 ```python
 if child.is_dir() and not child.is_symlink():
     if child.name in EXCLUDED_DIRS:
+        if (is_root
+                and (child / "index.md").is_file()
+                and _has_real_markdown(child)):
+            entries.append(...)   # the one deliberate link, below
         continue
     if _has_real_markdown(child):
         ...
@@ -78,11 +82,32 @@ This second check is load-bearing because of how `_iter_dirs` is written: **it y
 argument before it filters anything.** `_has_real_markdown(child)` calls `_iter_dirs(child)`,
 which yields `child` itself — so calling it on `openwiki/experience` would list that directory's
 own `decisions.md` and any `candidates/*.md` (`index.md` is in `RESERVED` and filtered out
-regardless) and report "yes, real pages here". Without the explicit skip, the
-root index would grow a `- [Experience](experience/index.md)` entry, linking a subtree that is
-otherwise invisible to the tool. `pass_indexes` (`scripts/openwiki-finalize.py:322`) needs no
-third check: its directory list comes from `_iter_dirs(wiki)`, which never yields `experience`
-at all, so no `index.md` is ever written inside it.
+regardless) and report "yes, real pages here". Without the explicit skip, *every* parent index
+would grow an entry pointing into the layer — including a nested `concepts/experience/`, the
+case the exclusion exists to catch. `pass_indexes` needs no third check: its directory list
+comes from `_iter_dirs(wiki)`, which never yields `experience` at all, so no `index.md` is ever
+written inside it.
+
+### The one link that is written on purpose
+
+Inside that skip, and only there, `render_index` emits a single fixed entry (OW-9):
+
+```
+- [Experience](experience/index.md)
+```
+
+Three conditions gate it, each one answering a way the entry could do harm:
+
+| Condition | Why |
+| -- | -- |
+| `is_root` | A nested `experience/` is a mistake. Linking it would legitimize it; `report_excluded_dirs` warns instead. |
+| `(child / "index.md").is_file()` | `pass_links` runs right after `pass_indexes`. A link to a missing target gets annotated broken on the same run. |
+| `_has_real_markdown(child)` | An index-only stub has nothing behind it, so it is treated like any other empty directory. |
+
+The distinction this draws is between *writing* and *linking*. Not writing inside the layer is
+the invariant, and it still holds absolutely — the entry lives in the root `index.md`, a file
+the finalizer already owns and regenerates wholesale. The authored `experience/index.md` it
+points at is never touched.
 
 ### Why `RESERVED` is not the seam
 
@@ -236,19 +261,26 @@ temporary caution — it is where the missing signal comes from.
 
 All in `scripts/test_finalize.py`:
 
-- **`TestExcludedDirs`** (line 244) seeds a populated `experience/` tree and asserts, pass by
-  pass, that it is invisible: no front matter backfilled, no `index.md` written inside it, no
-  `experience` entry in the root index, the authored `experience/index.md` left byte-identical,
-  broken links under it not annotated, and no provenance stamp landing on it. Each case calls the
-  pass directly, so a regression names the pass that broke.
-- **`TestIdempotence.test_a_populated_experience_layer_stays_byte_identical`** (line 657) runs the
+- **`TestExcludedDirs`** (line 245) seeds a populated `experience/` tree and asserts, pass by
+  pass, that it is invisible to writes: no front matter backfilled, no `index.md` written inside
+  it, the authored `experience/index.md` left byte-identical, broken links under it not
+  annotated, and no provenance stamp landing on it. It also pins the navigation exception from
+  both sides — the root index carries exactly one `experience/index.md` entry and that entry
+  survives `pass_links` unannotated, while a nested `experience/`, an index-less one, and an
+  index-only stub each stay unlinked. Each case calls the pass directly, so a regression names
+  the pass that broke.
+- **`TestVersionBanner`** (line 400) runs the CLI as a subprocess and asserts the version line
+  reaches stdout on a normal run, in `--snapshot` mode, and on the no-such-directory early
+  return. A fourth case pins `VERSION` to `.claude-plugin/plugin.json`, so the number the script
+  reports is always the one users install by.
+- **`TestIdempotence.test_a_populated_experience_layer_stays_byte_identical`** (line 818) runs the
   full CLI twice — snapshot then finalize, twice over — and compares every `.md` byte for byte.
   This is the end-to-end version: it would catch an exclusion that holds for one pass but leaks
   through the interaction of several.
-- **`TestDocClaims.test_planner_is_told_never_to_plan_the_experience_subtree`** (line 1169)
+- **`TestDocClaims.test_planner_is_told_never_to_plan_the_experience_subtree`** (line 1360)
   asserts the planner sentence is present in **both** `commands/wiki.md` and
   `.agents/skills/openwiki/SKILL.md`, which is the guard against the two ports drifting apart.
-- **`TestShippedCopy`** (line 1028) asserts the finalizer shipped under
+- **`TestShippedCopy`** (line 1189) asserts the finalizer shipped under
   `.agents/skills/openwiki/scripts/` matches `scripts/` — so a change to `EXCLUDED_DIRS` that is
   made in only one copy fails the suite.
 - **`hooks/test_gate.sh`** (lines 53-59) covers Guard 3 from outside Python.
