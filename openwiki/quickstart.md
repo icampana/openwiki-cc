@@ -95,9 +95,9 @@ wiki run actually executes.
 
 ## Model tier — do not run this small
 
-Upstream OpenWiki assumes a **frontier coding model** (default `z-ai/glm-5.2`; provider list
-includes Claude Opus 4.8 / Sonnet 5 / GPT 5.5). Run the command **and its subagents on Opus 4.8**
-(Sonnet 5 minimum) on Claude Code, or Codex's strongest tier with high reasoning effort.
+Upstream OpenWiki assumes a **frontier coding model** (default `z-ai/glm-5.2`). Run the command
+**and its subagents on your strongest available model** with high reasoning effort — the top
+Opus tier on Claude Code, Codex's strongest tier elsewhere.
 Documentation quality depends directly on the model — a small/fast tier produces a shallow wiki.
 
 ## Where to go next

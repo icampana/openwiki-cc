@@ -314,7 +314,7 @@ Use it to produce a compact task-routing map and link to the major domains.`
     : ""
 }
 
-**[adapted]** If you find an HTML comment starting with "openwiki: broken internal link", repair the href or restore the target page using the reason in the comment, then delete the comment. (Upstream v0.5.0 repository prompts no longer carry this; the port's Step 3b creates the annotations, so the port owns the repair loop.)
+**[adapted]** If you find an HTML comment starting with "openwiki: broken internal link", repair the href or restore the target page using the reason in the comment, then delete the comment. (Step 3b creates these annotations, so the port owns the repair loop.)
 **[adapted]** Do not read secrets (.env, keys, credentials) and do not create or edit agent instruction files (AGENTS.md, CLAUDE.md) during the run. (Retained from the v0.3.3 port; the v0.5.0 repository prompts carry no security section and upstream enforces this in harness tooling the port does not have.)
 
 Dispatch: for every page in the Phase 1 plan, launch one subagent briefed with the Phase 2

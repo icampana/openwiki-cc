@@ -204,9 +204,9 @@ checkpointer (durable crash-resume is intentionally dropped).
 ## Model tier
 
 OpenWiki assumes a frontier coding model (default `z-ai/glm-5.2`, fallbacks
-`openai/gpt-5.4-mini` / `anthropic/claude-sonnet-5`, provider list including Claude Opus 4.8 /
-Sonnet 5 / GPT 5.5). **Run this command and its subagents on Opus 4.8** (Sonnet 5 minimum) for
-comparable documentation quality.
+`openai/gpt-5.4-mini` / `anthropic/claude-sonnet-5`). **Run this command and its subagents on
+your strongest available model** with high reasoning effort, for comparable documentation
+quality.
 
 ## Headless / CI (`claude -p`)
 
